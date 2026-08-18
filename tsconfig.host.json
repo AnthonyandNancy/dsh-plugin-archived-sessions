@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": false
+  },
+  "files": [],
+  "references": [
+    { "path": "./packages/dsh-plugin-archived-sessions/tsconfig.build.host.json" },
+    { "path": "./packages/dsh-typert-protocol/tsconfig.json" }
+  ]
+}

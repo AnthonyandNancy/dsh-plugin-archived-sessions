@@ -1,0 +1,24 @@
+{
+  "name": "dsh-plugin-archived-sessions-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:host && npm run build:client",
+    "build:host": "tsc -b tsconfig.host.json && tsdown --env.DSH_BUILD_FACE host",
+    "build:client": "tsc -b tsconfig.client.json && tsdown --env.DSH_BUILD_FACE client",
+    "clean": "node scripts/clean.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-typert-generator": "file:../deepseek-harness-desktop/upstream/deepseek-harness/packages/typert/generator",
+    "@deepseek-ai/dsh-typert-protocol": "file:../deepseek-harness-desktop/upstream/deepseek-harness/packages/typert/protocol",
+    "@types/node": "^22.0.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {}
+}

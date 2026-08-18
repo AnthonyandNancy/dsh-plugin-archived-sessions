@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo"
+  },
+  "files": [
+    "src/client/index.ts",
+    "src/client/ArchivedSessionsSection.tsx",
+    "src/client/locales.ts",
+    "src/client/store.ts",
+    "src/types.ts"
+  ],
+  "references": [
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/vendor/cordis" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/api/remotes/tsconfig.client.json" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/runtime" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/locale" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/ui-slots" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/ui-primitives" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/web-react" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/ui-settings" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/client/ui-conversation" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/core/session" },
+    { "path": "../../../deepseek-harness-desktop/upstream/deepseek-harness/packages/typert/protocol" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.client.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": false
+  },
+  "files": [],
+  "references": [
+    { "path": "./packages/dsh-plugin-archived-sessions/tsconfig.build.client.json" }
+  ]
+}
