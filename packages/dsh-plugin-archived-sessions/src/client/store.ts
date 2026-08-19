@@ -1,8 +1,8 @@
 /**
  * Archived Sessions client store: a small external store fed by the Host
  * Remote API for listing / restore / deletion. It keeps the full fetched list
- * in memory and exposes an append-only `loadedCount` cursor so infinite
- * scroll never replaces already rendered rows.
+ * in memory. Session reveal / per-project expansion is presentation state
+ * owned by the UI, not by the store.
  *
  * Refresh is split into a full first load (`status: 'loading'`) and quiet
  * background refreshes (`refreshing: true`): once rows are on screen, a
@@ -27,10 +27,8 @@ export interface ArchivedSessionsState {
   readonly status: 'loading' | 'ready' | 'error'
   /** True while a background refresh is in flight after the first load. */
   readonly refreshing: boolean
-  /** Full fetched list; the UI renders `items.slice(0, loadedCount)`. */
+  /** Full fetched list; the UI derives all workspace groups from this. */
   readonly items: readonly ArchivedSessionItem[]
-  /** Number of rows currently revealed by infinite scroll. */
-  readonly loadedCount: number
   readonly error: string | null
   readonly filter: string
   readonly sort: ArchivedSort
@@ -45,13 +43,10 @@ export interface ArchivedSessionsRemote {
   delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
 }
 
-export const ARCHIVED_SESSIONS_PAGE_SIZE = 20
-
 const INITIAL_STATE: ArchivedSessionsState = {
   status: 'loading',
   refreshing: false,
   items: [],
-  loadedCount: ARCHIVED_SESSIONS_PAGE_SIZE,
   error: null,
   filter: '',
   sort: 'lastActivity',
@@ -90,18 +85,11 @@ export class ArchivedSessionsStore {
     return this.refreshPromise
   }
 
-  loadMore(): void {
-    const next = Math.min(this.state.loadedCount + ARCHIVED_SESSIONS_PAGE_SIZE, this.state.items.length)
-    if (next === this.state.loadedCount) return
-    this.state = { ...this.state, loadedCount: next }
-    this.emit()
-  }
-
   /**
    * Restore a session through the Host Remote, then remove it from the local
    * list only after the Host confirms (pessimistic). No full reload is
-   * issued, so scroll position and loaded pages are preserved; a later
-   * archive-set snapshot refresh converges to the same final state.
+   * issued, so scroll position and expanded/reveal UI state are preserved; a
+   * later archive-set snapshot refresh converges to the same final state.
    */
   async restore(sessionId: string): Promise<void> {
     const result = await this.remote.restore({ sessionId })
@@ -124,14 +112,13 @@ export class ArchivedSessionsStore {
     throw new Error(result.value.message)
   }
 
-  /** Idempotently drop one id from the local list and keep the loaded cursor stable. */
+  /** Idempotently drop one id from the local list. */
   removeById(sessionId: string): void {
     const items = this.state.items.filter(item => item.sessionId !== sessionId)
     if (items.length === this.state.items.length) return
     this.state = {
       ...this.state,
       items,
-      loadedCount: Math.min(this.state.loadedCount, items.length),
     }
     this.emit()
   }
@@ -139,7 +126,7 @@ export class ArchivedSessionsStore {
   private async doRefresh(): Promise<void> {
     // First load (no rows yet, not previously ready) may show the full
     // loading state; once anything was rendered, a refresh is quiet and
-    // keeps `status: 'ready'`, `items`, `loadedCount`, `filter`, `sort`.
+    // keeps `status: 'ready'`, `items`, `filter`, `sort`.
     const firstLoad = this.state.items.length === 0 && this.state.status !== 'ready'
     this.state = {
       ...this.state,
@@ -157,7 +144,6 @@ export class ArchivedSessionsStore {
         refreshing: false,
         items: result.value.items,
         capabilities: result.value.capabilities,
-        loadedCount: Math.min(this.state.loadedCount, result.value.items.length),
         error: null,
       }
     } catch (error: unknown) {

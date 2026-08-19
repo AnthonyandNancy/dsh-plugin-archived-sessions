@@ -8,6 +8,7 @@
   "files": [
     "src/client/index.ts",
     "src/client/ArchivedSessionsSection.tsx",
+    "src/client/groupByWorkspace.ts",
     "src/client/locales.ts",
     "src/client/store.ts",
     "src/types.ts"

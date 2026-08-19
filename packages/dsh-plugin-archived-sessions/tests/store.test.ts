@@ -1,12 +1,14 @@
 /**
- * ArchivedSessionsStore unit tests: no-flash background refresh, restore
- * without pagination resets, pessimistic removal, capability flow, and
- * failure modes.
+ * ArchivedSessionsStore and workspace-grouping unit tests: no-flash
+ * background refresh, restore without pagination resets, pessimistic
+ * removal, capability flow, failure modes, and the first-screen invariant
+ * that all workspace headers derive from the complete item list.
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ArchivedSessionsStore, ARCHIVED_SESSIONS_PAGE_SIZE } from '../src/client/store.ts'
+import { ArchivedSessionsStore } from '../src/client/store.ts'
+import { groupByWorkspace } from '../src/client/groupByWorkspace.ts'
 import type { ArchivedSessionsRemote } from '../src/client/store.ts'
 import type {
   ArchivedSessionItem,
@@ -22,6 +24,18 @@ function makeItem(index: number): ArchivedSessionItem {
     title: `会话 ${index}`,
     createdAt: 1_700_000_000_000 + index,
     lastActivityAt: 1_700_000_000_000 + index,
+    running: false,
+  }
+}
+
+function makeWorkspaceItem(workspaceId: string, title: string, order: number): ArchivedSessionItem {
+  return {
+    sessionId: `${workspaceId}-${order}`,
+    title,
+    workspaceId,
+    workspaceTitle: workspaceId,
+    createdAt: 1_700_000_000_000 + order,
+    lastActivityAt: 1_700_000_000_000 + order,
     running: false,
   }
 }
@@ -62,26 +76,23 @@ test('initial state: full loading, not refreshing, capabilities unknown until fi
   assert.equal(state.status, 'loading')
   assert.equal(state.refreshing, false)
   assert.deepEqual(state.items, [])
-  assert.equal(state.loadedCount, ARCHIVED_SESSIONS_PAGE_SIZE)
   assert.deepEqual(state.capabilities, { restore: 'unsupported', delete: 'unsupported' })
 })
 
-test('first load: caps at page size and surfaces host capabilities', async () => {
+test('first load keeps the full fetched list and surfaces host capabilities', async () => {
   const store = new ArchivedSessionsStore(makeRemote({ list: async () => ({ ok: true, value: listResult(60) }) }))
   await store.refresh()
   const state = store.getSnapshot()
   assert.equal(state.status, 'ready')
   assert.equal(state.refreshing, false)
   assert.equal(state.items.length, 60)
-  assert.equal(state.loadedCount, ARCHIVED_SESSIONS_PAGE_SIZE)
   assert.deepEqual(state.capabilities, CAPABILITIES)
 })
 
-test('background refresh does not flash: rows, loadedCount and status stay put while refreshing', async () => {
+test('background refresh does not flash: rows and status stay put while refreshing', async () => {
   const remote = makeRemote({ list: async () => ({ ok: true, value: listResult(60) }) })
   const store = new ArchivedSessionsStore(remote)
   await store.refresh()
-  for (let index = 1; index < 60; index++) store.loadMore()
 
   const gate = deferred<{ ok: true; value: ArchivedSessionListResult }>()
   remote.list = () => gate.promise
@@ -90,7 +101,6 @@ test('background refresh does not flash: rows, loadedCount and status stay put w
   assert.equal(during.status, 'ready')
   assert.equal(during.refreshing, true)
   assert.equal(during.items.length, 60)
-  assert.equal(during.loadedCount, 60)
   assert.equal(during.filter, '')
   assert.equal(during.sort, 'lastActivity')
 
@@ -100,20 +110,17 @@ test('background refresh does not flash: rows, loadedCount and status stay put w
   assert.equal(after.status, 'ready')
   assert.equal(after.refreshing, false)
   assert.equal(after.items.length, 60)
-  assert.equal(after.loadedCount, 60)
 })
 
-test('restore removes only the restored row, keeps pagination, and never reloads the list', async () => {
+test('restore removes only the restored row and never reloads the list', async () => {
   const remote = makeRemote({ list: async () => ({ ok: true, value: listResult(60) }) })
   const store = new ArchivedSessionsStore(remote)
   await store.refresh()
-  for (let index = 1; index < 60; index++) store.loadMore()
 
   await store.restore('session-34')
   const state = store.getSnapshot()
   assert.equal(state.items.length, 59)
   assert.equal(state.items.some(item => item.sessionId === 'session-34'), false)
-  assert.equal(state.loadedCount, 59)
   assert.equal(state.status, 'ready')
   assert.equal(state.refreshing, false)
   assert.equal(remote.listCalls(), 1)
@@ -146,7 +153,6 @@ test('background refresh failure keeps current rows visible and records the erro
   const remote = makeRemote({ list: async () => ({ ok: true, value: listResult(60) }) })
   const store = new ArchivedSessionsStore(remote)
   await store.refresh()
-  for (let index = 1; index < 60; index++) store.loadMore()
 
   const gate = deferred<{ ok: false; error: { code: string; message: string; details: object } }>()
   remote.list = () => gate.promise as never
@@ -158,7 +164,6 @@ test('background refresh failure keeps current rows visible and records the erro
   assert.equal(state.status, 'ready')
   assert.equal(state.refreshing, false)
   assert.equal(state.items.length, 60)
-  assert.equal(state.loadedCount, 60)
   assert.equal(state.error, 'boom')
 })
 
@@ -187,4 +192,58 @@ test('retry after a failed first load goes back through the full loading state',
   assert.equal(store.getSnapshot().status, 'loading')
   await pending
   assert.equal(store.getSnapshot().status, 'ready')
+})
+
+test('grouping: shows every archived workspace before any load-more interaction', () => {
+  const items = [
+    ...Array.from({ length: 19 }, (_, index) => makeWorkspaceItem('a', `A ${index}`, index)),
+    ...Array.from({ length: 19 }, (_, index) => makeWorkspaceItem('b', `B ${index}`, 100 + index)),
+    ...Array.from({ length: 19 }, (_, index) => makeWorkspaceItem('c', `C ${index}`, 200 + index)),
+    ...Array.from({ length: 19 }, (_, index) => makeWorkspaceItem('d', `D ${index}`, 300 + index)),
+    ...Array.from({ length: 19 }, (_, index) => makeWorkspaceItem('e', `E ${index}`, 400 + index)),
+  ]
+
+  const groups = groupByWorkspace(items, 'Unknown workspace')
+
+  assert.equal(groups.length, 5)
+  assert.deepEqual(groups.map(group => group.key), ['a', 'b', 'c', 'd', 'e'])
+  assert.ok(groups.every(group => group.items.length === 19))
+})
+
+test('grouping: a single workspace with more than one batch does not hide later workspace headers', () => {
+  const items = [
+    ...Array.from({ length: 100 }, (_, index) => makeWorkspaceItem('a', `A ${index}`, index)),
+    makeWorkspaceItem('b', 'B', 1000),
+    makeWorkspaceItem('c', 'C', 1001),
+    makeWorkspaceItem('d', 'D', 1002),
+  ]
+
+  const groups = groupByWorkspace(items, 'Unknown workspace')
+
+  assert.equal(groups.length, 4)
+  assert.deepEqual(groups.map(group => group.key), ['a', 'b', 'c', 'd'])
+  assert.equal(groups[0]?.items.length, 100)
+})
+
+test('grouping: groups follow the first occurrence order of the sorted item list', () => {
+  const items = [
+    makeWorkspaceItem('z', 'Z newest', 5),
+    makeWorkspaceItem('a', 'A older', 1),
+    makeWorkspaceItem('z', 'Z older', 4),
+    makeWorkspaceItem('m', 'M middle', 3),
+  ]
+
+  const groups = groupByWorkspace(items, 'Unknown workspace')
+
+  assert.deepEqual(groups.map(group => group.key), ['z', 'a', 'm'])
+  assert.deepEqual(groups[0]?.items.map(item => item.title), ['Z newest', 'Z older'])
+})
+
+test('grouping: 100 workspaces are all present without load-more interaction', () => {
+  const items = Array.from({ length: 100 }, (_, index) => makeWorkspaceItem(`workspace-${index}`, `Workspace ${index}`, index))
+
+  const groups = groupByWorkspace(items, 'Unknown workspace')
+
+  assert.equal(groups.length, 100)
+  assert.equal(new Set(groups.map(group => group.key)).size, 100)
 })

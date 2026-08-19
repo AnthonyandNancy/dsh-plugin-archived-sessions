@@ -40,6 +40,14 @@ test('workspace groups provide a nested session content layout', () => {
   assert.match(sectionSource, /<div style=\{groupContentStyle\}>/)
 })
 
+test('regression: all workspace headers derive from full items before session reveal', () => {
+  assert.match(sectionSource, /const groups = useMemo\(\(\) => groupByWorkspace\(items, t\('unknownWorkspace'\)\)/)
+  assert.doesNotMatch(sectionSource, /groupByWorkspace\(visibleItems/)
+  assert.doesNotMatch(sectionSource, /visibleItems\s*=\s*items\.slice/)
+  assert.doesNotMatch(sectionSource, /state\.loadedCount/)
+  assert.doesNotMatch(sectionSource, /store\.loadMore\(\)/)
+})
+
 test('action failures use a user-facing message while logging the endpoint', () => {
   assert.match(sectionSource, /console\.error\(`archived-sessions: archivedSessions\/\$\{endpoint\} failed`, error\)/)
   assert.match(sectionSource, /setActionError\(t\(endpoint === 'restore' \? 'restoreFailed' : 'deleteFailed'\)\)/)

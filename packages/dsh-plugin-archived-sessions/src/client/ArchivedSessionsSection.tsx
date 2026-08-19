@@ -2,16 +2,17 @@
  * Archived Sessions Settings section.
  *
  * Renders the archive manager inside the DSH Settings page: search, sort,
- * workspace grouping, append-only infinite scroll, restore, and a
+ * workspace grouping, per-project session reveal, restore, and a
  * checkbox-gated permanent delete confirmation. Restore is pessimistic and
  * removes only the restored row after the Host confirms.
  */
 
-import { useSyncExternalStore, useState, useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { useSyncExternalStore, useState, useEffect, useMemo, type CSSProperties } from 'react'
 import { Button, Input, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ArchivedSessionItem } from '../types.ts'
 import type { ArchivedSessionsStore } from './store.ts'
 import type { ArchivedSessionsKey } from './locales.ts'
+import { groupByWorkspace, type ArchivedGroup } from './groupByWorkspace.ts'
 
 export interface ArchivedSessionsSectionProps {
   /** Close the Settings panel (owned by the shell). Kept because the shell supplies it to every section. */
@@ -22,11 +23,8 @@ export interface ArchivedSessionsSectionProps {
   t: (key: ArchivedSessionsKey) => string
 }
 
-interface ArchivedGroup {
-  readonly key: string
-  readonly title: string
-  readonly items: ArchivedSessionItem[]
-}
+/** Number of sessions revealed at a time inside one expanded workspace. */
+const SESSION_BATCH_SIZE = 20
 
 const rowStyle: CSSProperties = {
   display: 'flex',
@@ -139,10 +137,9 @@ export function ArchivedSessionsSection({
   const [acknowledged, setAcknowledged] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const sentinelRef = useRef<HTMLDivElement | null>(null)
-  const loadingGuard = useRef(false)
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set())
+  const [visibleCounts, setVisibleCounts] = useState<Map<string, number>>(() => new Map())
 
   const toggleGroup = (key: string): void => {
     // Do not modify expanded state during search — search temporarily overrides
@@ -177,36 +174,18 @@ export function ArchivedSessionsSection({
         : right.createdAt - left.createdAt)
   }, [state.items, state.filter, state.sort])
 
-  const visibleItems = useMemo(() => items.slice(0, state.loadedCount), [items, state.loadedCount])
-  const hasMore = state.loadedCount < items.length
+  const groups = useMemo(() => groupByWorkspace(items, t('unknownWorkspace')), [items, t])
 
-  const groups = useMemo(() => groupByWorkspace(visibleItems, t('unknownWorkspace')), [visibleItems, t])
-  const groupCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const item of items) {
-      const key = item.workspaceId ?? '__ungrouped__'
-      counts.set(key, (counts.get(key) ?? 0) + 1)
-    }
-    return counts
-  }, [items])
+  const getVisibleCount = (group: ArchivedGroup): number =>
+    visibleCounts.get(group.key) ?? SESSION_BATCH_SIZE
 
-  useEffect(() => {
-    if (!hasMore) return
-    const node = sentinelRef.current
-    if (node === null) return
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries.some(entry => entry.isIntersecting)) return
-      // If all groups are collapsed, skip loading more — the sentinel would
-      // stay visible and trigger an infinite loop.
-      if (state.filter.trim().length === 0 && expandedGroups.size === 0) return
-      if (loadingGuard.current) return
-      loadingGuard.current = true
-      store.loadMore()
-      setTimeout(() => { loadingGuard.current = false }, 300)
-    }, { rootMargin: '200px' })
-    observer.observe(node)
-    return () => { observer.disconnect() }
-  }, [store, hasMore, state.filter, expandedGroups])
+  const revealMore = (key: string): void => {
+    setVisibleCounts(previous => {
+      const next = new Map(previous)
+      next.set(key, (next.get(key) ?? SESSION_BATCH_SIZE) + SESSION_BATCH_SIZE)
+      return next
+    })
+  }
 
   const runAction = async (
     id: string,
@@ -284,6 +263,8 @@ export function ArchivedSessionsSection({
       {items.length > 0 && groups.map(group => {
         const searching = state.filter.trim().length > 0
         const expanded = searching ? true : expandedGroups.has(group.key)
+        const visibleCount = getVisibleCount(group)
+        const visibleGroupItems = group.items.slice(0, visibleCount)
 
         return (
           <section key={group.key} style={groupContainerStyle}>
@@ -298,12 +279,12 @@ export function ArchivedSessionsSection({
                 <span style={groupTitleStyle}>{group.title}</span>
               </span>
               <span style={groupCountStyle}>
-                {groupCounts.get(group.key) ?? group.items.length} {t('sessionCount')}
+                {group.items.length} {t('sessionCount')}
               </span>
             </button>
             {expanded && (
               <div style={groupContentStyle}>
-                {group.items.map(item => (
+                {visibleGroupItems.map(item => (
                   <div key={item.sessionId} style={rowStyle}>
                     <div style={rowMainStyle}>
                       <p style={titleStyle}>{item.title}</p>
@@ -338,13 +319,18 @@ export function ArchivedSessionsSection({
                     </div>
                   </div>
                 ))}
+                {visibleCount < group.items.length && (
+                  <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                    <Button variant="ghost" onClick={() => { revealMore(group.key) }}>
+                      {t('loadMore')}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </section>
         )
       })}
-
-      {hasMore && <div ref={sentinelRef} style={{ height: 1 }} />}
 
       {deleting !== null && (
         <RiskConfirmation
@@ -386,23 +372,6 @@ function Chevron({ expanded }: { expanded: boolean }) {
       />
     </svg>
   )
-}
-
-function groupByWorkspace(items: readonly ArchivedSessionItem[], unknownWorkspace: string): ArchivedGroup[] {
-  const groups: ArchivedGroup[] = []
-  const index = new Map<string, number>()
-  for (const item of items) {
-    const key = item.workspaceId ?? '__ungrouped__'
-    const title = item.workspaceTitle ?? unknownWorkspace
-    const existing = index.get(key)
-    if (existing === undefined) {
-      index.set(key, groups.length)
-      groups.push({ key, title, items: [item] })
-    } else {
-      groups[existing]?.items.push(item)
-    }
-  }
-  return groups
 }
 
 function formatTime(value: number): string {
