@@ -101,26 +101,40 @@ export function apply(ctx: ClientContext): void {
     return () => { offZh(); offEn() }
   }, 'archived-sessions: dictionaries')
 
-  // Mount the Host Remote API.
-  const mountPromise = ctx.remote.$mount(remote)
-  ctx.effect(() => {
-    let disposer: (() => Promise<void>) | undefined
-    void mountPromise.then((value) => { disposer = value })
-    return () => { void disposer?.() }
-  }, 'archived-sessions: remote mount')
-
-  // Start the Settings section only after the Remote namespace is mounted, so
-  // the child can inject `remote.archivedSessions` without a boot deadlock.
+  // Mount the Host Remote API and create the Settings consumer from the same
+  // owner. Keeping the mount, child plugin, and disposer in one effect avoids a
+  // race where a fast reload disposes before $mount() resolves, leaving a late
+  // contribution mounted without an owner.
   ctx.effect(() => {
     let disposed = false
+    let remoteDisposer: (() => Promise<void>) | undefined
     let child: { dispose(): void } | undefined
-    void mountPromise.then(() => {
-      if (disposed) return
-      child = ctx.plugin(ArchivedSessionsSectionPlugin)
-    })
+
+    const mount = async (): Promise<void> => {
+      try {
+        const disposer = await ctx.remote.$mount(remote)
+        if (disposed) {
+          await disposer()
+          return
+        }
+        remoteDisposer = disposer
+        child = ctx.plugin(ArchivedSessionsSectionPlugin)
+      } catch (error: unknown) {
+        // Keep the original assembly error in the developer console. The UI
+        // action mapping handles end-user errors separately and never exposes
+        // Typert fallback/withdrawal internals in a settings row.
+        console.error('archived-sessions: failed to mount Remote contribution', error)
+      }
+    }
+    void mount()
+
     return () => {
       disposed = true
       child?.dispose()
+      const disposer = remoteDisposer
+      if (disposer !== undefined) void disposer().catch(error => {
+        console.error('archived-sessions: failed to dispose Remote contribution', error)
+      })
     }
-  }, 'archived-sessions: settings plugin')
+  }, 'archived-sessions: remote and settings lifecycle')
 }

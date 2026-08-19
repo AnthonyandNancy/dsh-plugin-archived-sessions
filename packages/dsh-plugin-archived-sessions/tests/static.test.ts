@@ -24,10 +24,33 @@ function collectSources(dir: string, out: string[] = []): string[] {
 }
 
 const sources = collectSources(SRC_ROOT).map(path => ({ path, text: readFileSync(path, 'utf8') }))
+const sectionSource = readFileSync(join(SRC_ROOT, 'client', 'ArchivedSessionsSection.tsx'), 'utf8')
+const clientIndexSource = readFileSync(join(SRC_ROOT, 'client', 'index.ts'), 'utf8')
 
 test('plugin code has 0 references to ctx.workspaces.restoreSession', () => {
   const hits = sources.filter(({ text }) => /restoreSession/.test(text))
   assert.deepEqual(hits.map(hit => hit.path), [])
+})
+
+test('workspace groups provide a nested session content layout', () => {
+  assert.match(sectionSource, /const groupContentStyle: CSSProperties = \{[\s\S]*paddingLeft: '24px'/)
+  assert.match(sectionSource, /paddingTop: '4px'/)
+  assert.match(sectionSource, /paddingBottom: '6px'/)
+  assert.match(sectionSource, /padding: '12px 4px'/)
+  assert.match(sectionSource, /<div style=\{groupContentStyle\}>/)
+})
+
+test('action failures use a user-facing message while logging the endpoint', () => {
+  assert.match(sectionSource, /console\.error\(`archived-sessions: archivedSessions\/\$\{endpoint\} failed`, error\)/)
+  assert.match(sectionSource, /setActionError\(t\(endpoint === 'restore' \? 'restoreFailed' : 'deleteFailed'\)\)/)
+  assert.doesNotMatch(sectionSource, /setActionError\(error instanceof Error \? error\.message/)
+})
+
+test('Remote contribution has one client lifecycle owner', () => {
+  assert.equal([...clientIndexSource.matchAll(/\$mount\(remote\)/g)].length, 1)
+  assert.match(clientIndexSource, /const disposer = await ctx\.remote\.\$mount\(remote\)/)
+  assert.match(clientIndexSource, /if \(disposed\) \{[\s\S]*await disposer\(\)/)
+  assert.match(clientIndexSource, /const disposer = remoteDisposer[\s\S]*void disposer\(\)\.catch/)
 })
 
 test('no startup hard-fail on missing unarchiveSession / restoreSession', () => {
@@ -86,4 +109,16 @@ test('restore / capabilities wire types are present in the built declarations', 
   assert.match(dts, /interface ArchivedSessionDeleteUnsupportedError/)
   assert.match(dts, /interface ArchivedSessionsCapabilities/)
   assert.match(dts, /restore: 'native' \| 'rc6-compat' \| 'unsupported'/)
+})
+
+test('built Host and Client Typert artifacts contain all strict endpoints', () => {
+  for (const relativePath of ['lib/typert.host.js', 'lib/typert.remote-client.js']) {
+    const artifact = readFileSync(join(SRC_ROOT, '..', relativePath), 'utf8')
+    for (const method of ['list', 'restore', 'delete']) {
+      const endpoint = `archivedSessions/${method}`
+      const start = artifact.indexOf(endpoint)
+      assert.notEqual(start, -1, `${relativePath} is missing ${endpoint}`)
+      assert.match(artifact.slice(start, start + 1600), /mode: 'strict'/, `${relativePath} ${endpoint} is not strict`)
+    }
+  }
 })

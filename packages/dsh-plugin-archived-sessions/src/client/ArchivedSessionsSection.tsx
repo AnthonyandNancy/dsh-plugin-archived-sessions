@@ -32,7 +32,7 @@ const rowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: '12px',
-  padding: '12px 0',
+  padding: '10px 0',
   borderBottom: '1px solid var(--dsw-alias-divider)',
 }
 
@@ -96,7 +96,13 @@ const groupHeaderStyle: CSSProperties = {
   color: 'inherit',
   cursor: 'pointer',
   textAlign: 'left',
-  padding: '12px 0',
+  padding: '12px 4px',
+}
+
+const groupContentStyle: CSSProperties = {
+  paddingLeft: '24px',
+  paddingTop: '4px',
+  paddingBottom: '6px',
 }
 
 const groupHeadingStyle: CSSProperties = {
@@ -202,20 +208,27 @@ export function ArchivedSessionsSection({
     return () => { observer.disconnect() }
   }, [store, hasMore, state.filter, expandedGroups])
 
-  const runAction = async (id: string, action: () => Promise<void>): Promise<void> => {
+  const runAction = async (
+    id: string,
+    endpoint: 'restore' | 'delete',
+    action: () => Promise<void>,
+  ): Promise<void> => {
     setBusyId(id)
     setActionError(null)
     try {
       await action()
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      // Keep the transport/contract failure available to developers without
+      // exposing Typert internals such as SRC fallback policy to end users.
+      console.error(`archived-sessions: archivedSessions/${endpoint} failed`, error)
+      setActionError(t(endpoint === 'restore' ? 'restoreFailed' : 'deleteFailed'))
     } finally {
       setBusyId(null)
     }
   }
 
   const handleRestore = (item: ArchivedSessionItem): void => {
-    void runAction(item.sessionId, () => store.restore(item.sessionId))
+    void runAction(item.sessionId, 'restore', () => store.restore(item.sessionId))
   }
 
   const handleDelete = (): void => {
@@ -223,7 +236,7 @@ export function ArchivedSessionsSection({
     const target = deleting
     setDeleting(null)
     setAcknowledged(false)
-    void runAction(target.sessionId, () => store.delete(target.sessionId))
+    void runAction(target.sessionId, 'delete', () => store.delete(target.sessionId))
   }
 
   return (
@@ -289,7 +302,7 @@ export function ArchivedSessionsSection({
               </span>
             </button>
             {expanded && (
-              <div>
+              <div style={groupContentStyle}>
                 {group.items.map(item => (
                   <div key={item.sessionId} style={rowStyle}>
                     <div style={rowMainStyle}>
