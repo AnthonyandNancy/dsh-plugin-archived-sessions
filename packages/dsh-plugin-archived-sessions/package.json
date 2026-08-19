@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/example/dsh-plugin-archived-sessions"
+    "url": "https://github.com/AnthonyandNancy/dsh-plugin-archived-sessions"
   },
   "publishConfig": {
     "access": "public"
@@ -106,6 +106,7 @@
     "build:host": "tsc -b tsconfig.build.host.json && tsdown --env.DSH_BUILD_FACE host",
     "build:client": "tsc -b tsconfig.build.client.json && tsdown --env.DSH_BUILD_FACE client",
     "typecheck": "tsc --noEmit",
+    "test": "tsc -b tsconfig.build.host.json && node --test tests/restore-adapter.test.ts tests/service.test.ts tests/store.test.ts tests/static.test.ts",
     "pack": "npm pack"
   }
 }

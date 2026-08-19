@@ -28,6 +28,8 @@ export const zh = {
   cancel: '取消',
   deleteFailed: '删除失败',
   restoreFailed: '恢复失败',
+  restoreUnavailable: '当前 DSH 运行时不支持恢复',
+  deleteUnavailable: '当前 DSH 运行时不支持永久删除',
   unknownWorkspace: '未知工作区',
 }
 
@@ -57,6 +59,8 @@ export const en = {
   cancel: 'Cancel',
   deleteFailed: 'Delete failed',
   restoreFailed: 'Restore failed',
+  restoreUnavailable: 'Restore is unavailable on this DSH runtime',
+  deleteUnavailable: 'Permanent delete is unavailable on this DSH runtime',
   unknownWorkspace: 'Unknown workspace',
 }
 

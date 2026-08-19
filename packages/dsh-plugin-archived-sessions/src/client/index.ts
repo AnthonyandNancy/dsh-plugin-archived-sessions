@@ -6,7 +6,6 @@
  * archive set.
  */
 
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -20,6 +19,8 @@ import type {
   ArchivedSessionDeleteRequest,
   ArchivedSessionDeleteValue,
   ArchivedSessionListResult,
+  ArchivedSessionRestoreRequest,
+  ArchivedSessionRestoreValue,
 } from '../types.ts'
 
 export { ArchivedSessionsStore } from './store.ts'
@@ -36,6 +37,7 @@ export const inject = ['slots', 'locale', 'sessions', 'workspaces', 'remote']
 interface MountedArchivedSessionsRemote {
   archivedSessions: {
     list(): Promise<RemoteResult<ArchivedSessionListResult>>
+    restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
     delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
   }
 }
@@ -52,26 +54,17 @@ interface MountedArchivedSessionsRemote {
 const ArchivedSessionsSectionPlugin = {
   inject: ['slots', 'locale', 'sessions', 'workspaces', 'remote', 'remote.archivedSessions'],
   apply(ctx: ClientContext): void {
-    // Fail at startup instead of letting a user click Restore on an old DSH
-    // build that lacks the upstream `unarchiveSession` / `workspace.restoreSession`
-    // capability. The plugin's published minimum-version contract is documented
-    // in README.md.
-    if (typeof ctx.workspaces.restoreSession !== 'function') {
-      throw new Error(
-        'archived-sessions: incompatible DSH version — WorkspaceRegistry.unarchiveSession '
-        + '/ workspace.restoreSession is unavailable. Upgrade DSH to the minimum version '
-        + 'documented in the plugin README.',
-      )
-    }
-
+    // Restore is purely a Host Remote concern: the Host capability-detects
+    // the official registry API vs the rc.6 mutation surface and answers
+    // `restore-unsupported` as a domain result. The client never reaches
+    // into the workspace runtime's restore API, so no runtime shape can
+    // block plugin startup.
     const mounted = ctx.remote as unknown as MountedArchivedSessionsRemote
-    const store = new ArchivedSessionsStore(
-      {
-        list: () => mounted.archivedSessions.list(),
-        delete: request => mounted.archivedSessions.delete(request),
-      },
-      sessionId => ctx.workspaces.restoreSession(sessionId as SessionId),
-    )
+    const store = new ArchivedSessionsStore({
+      list: () => mounted.archivedSessions.list(),
+      restore: request => mounted.archivedSessions.restore(request),
+      delete: request => mounted.archivedSessions.delete(request),
+    })
 
     // Realtime sync: the workspace runtime already folds
     // `host/archived-sessions-changed` into its list snapshot, so a workspace

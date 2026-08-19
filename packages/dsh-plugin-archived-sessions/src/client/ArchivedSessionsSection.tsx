@@ -81,19 +81,40 @@ const stateStyle: CSSProperties = {
   fontSize: '14px',
 }
 
+const groupContainerStyle: CSSProperties = {
+  borderTop: '1px solid var(--dsw-alias-divider)',
+}
+
 const groupHeaderStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '14px 0 6px',
-  borderBottom: '1px solid var(--dsw-alias-divider)',
+  width: '100%',
+  border: 0,
+  background: 'transparent',
+  font: 'inherit',
+  color: 'inherit',
+  cursor: 'pointer',
+  textAlign: 'left',
+  padding: '12px 0',
+}
+
+const groupHeadingStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  minWidth: 0,
+  gap: '8px',
 }
 
 const groupTitleStyle: CSSProperties = {
   margin: 0,
-  fontSize: '13px',
+  fontSize: '16px',
+  lineHeight: '24px',
   fontWeight: 600,
   color: 'var(--dsw-alias-text-primary)',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 }
 
 const groupCountStyle: CSSProperties = {
@@ -113,6 +134,24 @@ export function ArchivedSessionsSection({
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const loadingGuard = useRef(false)
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set())
+
+  const toggleGroup = (key: string): void => {
+    // Do not modify expanded state during search — search temporarily overrides
+    // all groups to expanded without touching the user's manual state.
+    if (state.filter.trim().length > 0) return
+    setExpandedGroups(previous => {
+      const next = new Set(previous)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     void store.refresh()
@@ -150,11 +189,18 @@ export function ArchivedSessionsSection({
     const node = sentinelRef.current
     if (node === null) return
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some(entry => entry.isIntersecting)) store.loadMore()
+      if (!entries.some(entry => entry.isIntersecting)) return
+      // If all groups are collapsed, skip loading more — the sentinel would
+      // stay visible and trigger an infinite loop.
+      if (state.filter.trim().length === 0 && expandedGroups.size === 0) return
+      if (loadingGuard.current) return
+      loadingGuard.current = true
+      store.loadMore()
+      setTimeout(() => { loadingGuard.current = false }, 300)
     }, { rootMargin: '200px' })
     observer.observe(node)
     return () => { observer.disconnect() }
-  }, [store, hasMore])
+  }, [store, hasMore, state.filter, expandedGroups])
 
   const runAction = async (id: string, action: () => Promise<void>): Promise<void> => {
     setBusyId(id)
@@ -222,51 +268,68 @@ export function ArchivedSessionsSection({
         <div style={stateStyle}>{t('empty')}</div>
       )}
 
-      {items.length > 0 && groups.map(group => (
-        <div key={group.key}>
-          <div style={groupHeaderStyle}>
-            <h3 style={groupTitleStyle}>{group.title}</h3>
-            <span style={groupCountStyle}>
-              {groupCounts.get(group.key) ?? group.items.length} {t('sessionCount')}
-            </span>
-          </div>
-          {group.items.map(item => (
-            <div key={item.sessionId} style={rowStyle}>
-              <div style={rowMainStyle}>
-                <p style={titleStyle}>{item.title}</p>
-                <p style={metaStyle}>
-                  {item.workspaceTitle ?? t('unknownWorkspace')}
-                  {item.running ? ` · ${t('running')}` : ''}
-                  {' · '}
-                  {state.sort === 'lastActivity' ? t('lastActivity') : t('createdAt')}
-                  {' '}
-                  {formatTime(state.sort === 'lastActivity' ? item.lastActivityAt : item.createdAt)}
-                </p>
+      {items.length > 0 && groups.map(group => {
+        const searching = state.filter.trim().length > 0
+        const expanded = searching ? true : expandedGroups.has(group.key)
+
+        return (
+          <section key={group.key} style={groupContainerStyle}>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              style={groupHeaderStyle}
+              onClick={() => { toggleGroup(group.key) }}
+            >
+              <span style={groupHeadingStyle}>
+                <Chevron expanded={expanded} />
+                <span style={groupTitleStyle}>{group.title}</span>
+              </span>
+              <span style={groupCountStyle}>
+                {groupCounts.get(group.key) ?? group.items.length} {t('sessionCount')}
+              </span>
+            </button>
+            {expanded && (
+              <div>
+                {group.items.map(item => (
+                  <div key={item.sessionId} style={rowStyle}>
+                    <div style={rowMainStyle}>
+                      <p style={titleStyle}>{item.title}</p>
+                      <p style={metaStyle}>
+                        {item.workspaceTitle ?? t('unknownWorkspace')}
+                        {item.running ? ` · ${t('running')}` : ''}
+                        {' · '}
+                        {state.sort === 'lastActivity' ? t('lastActivity') : t('createdAt')}
+                        {' '}
+                        {formatTime(state.sort === 'lastActivity' ? item.lastActivityAt : item.createdAt)}
+                      </p>
+                    </div>
+                    <div style={actionsStyle}>
+                      <Button
+                        variant="outline"
+                        disabled={busyId === item.sessionId}
+                        onClick={() => { handleRestore(item) }}
+                      >
+                        {busyId === item.sessionId ? t('restoring') : t('restore')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        style={{ color: 'var(--dsw-alias-state-error-primary)' }}
+                        disabled={busyId === item.sessionId || item.running}
+                        onClick={() => {
+                          setDeleting(item)
+                          setAcknowledged(false)
+                        }}
+                      >
+                        {t('delete')}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={actionsStyle}>
-                <Button
-                  variant="outline"
-                  disabled={busyId === item.sessionId}
-                  onClick={() => { handleRestore(item) }}
-                >
-                  {busyId === item.sessionId ? t('restoring') : t('restore')}
-                </Button>
-                <Button
-                  variant="ghost"
-                  style={{ color: 'var(--dsw-alias-state-error-primary)' }}
-                  disabled={busyId === item.sessionId || item.running}
-                  onClick={() => {
-                    setDeleting(item)
-                    setAcknowledged(false)
-                  }}
-                >
-                  {t('delete')}
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
+            )}
+          </section>
+        )
+      })}
 
       {hasMore && <div ref={sentinelRef} style={{ height: 1 }} />}
 
@@ -285,6 +348,30 @@ export function ArchivedSessionsSection({
         />
       )}
     </div>
+  )
+}
+
+function Chevron({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      style={{
+        transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+        transition: 'transform 120ms ease',
+        flexShrink: 0,
+      }}
+    >
+      <path
+        d="M5 6L8 9L11 6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 

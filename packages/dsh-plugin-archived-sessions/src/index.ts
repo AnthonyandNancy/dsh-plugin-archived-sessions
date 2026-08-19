@@ -2,14 +2,17 @@
  * Archived Sessions plugin Host half.
  *
  * Exposes the official DSH Typert Remote API consumed by the Settings page:
- * list archived sessions and permanently delete one. Restore is intentionally
- * routed through the official `ctx.workspaces.restoreSession` client API (Host
- * `workspace.restoreSession` → `WorkspaceRegistry.unarchiveSession`), never
- * through a plugin-private registry reach. Deletion reuses the first-party
- * orchestration primitives added to upstream DSH
- * (`SessionPersistence.delete`, `AgentLoop.disposeAgent`, and the workspace
- * registry's unarchive/detach operations) — the plugin never touches session
- * files directly.
+ * list archived sessions, restore one, and permanently delete one. Restore is
+ * routed through the plugin's own {@link ArchiveCompatibilityAdapter}, which
+ * capability-detects the runtime — the official
+ * `WorkspaceRegistry.unarchiveSession` when it exists, the rc.6
+ * `enqueueOperation` / `requireState` / `setState` mutation surface
+ * otherwise — so the service starts on every DSH build and degrades to a
+ * `restore-unsupported` domain result only where no path exists. Deletion
+ * reuses first-party orchestration primitives (`SessionPersistence.delete`,
+ * `AgentLoop.disposeAgent`, workspace detach) and routes the archive-set
+ * cleanup through the same adapter primitive. The plugin never touches
+ * session files directly.
  *
  * @module dsh-plugin-archived-sessions
  */
@@ -18,11 +21,15 @@ import { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session/types'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { ArchiveCompatibilityAdapter } from './host/compat/restore.ts'
 import type {
   ArchivedSessionDeleteRequest,
   ArchivedSessionDeleteValue,
   ArchivedSessionItem,
   ArchivedSessionListResult,
+  ArchivedSessionRestoreRequest,
+  ArchivedSessionRestoreValue,
+  ArchivedSessionsCapabilities,
 } from './types.ts'
 import type { ArchivedSessionRunningError } from './types.ts'
 
@@ -35,18 +42,28 @@ interface ArchivedWorkspace {
   detachSession(sessionId: SessionId): Promise<void> | void
 }
 
-/** Minimal workspace-registry surface used by the archived-sessions host. */
+/**
+ * Minimal workspace-registry surface used by the archived-sessions host.
+ * `unarchiveSession` is intentionally optional: rc.6 runtimes expose only the
+ * archive set and their internal mutation path, which the compatibility
+ * adapter probes at runtime.
+ */
 interface ArchivedWorkspaceRegistry {
   archivedSessionIds: readonly SessionId[]
   list(): readonly ArchivedWorkspace[]
-  unarchiveSession(sessionId: SessionId): Promise<void>
+  unarchiveSession?(sessionId: SessionId): Promise<void>
 }
 
-/** Minimal durable-session-persistence surface used by the archived-sessions host. */
+/**
+ * Minimal durable-session-persistence surface used by the archived-sessions
+ * host. `delete` is optional because older runtimes may lack the
+ * orchestration; when absent, delete capability reports `unsupported` and
+ * the plugin keeps running.
+ */
 interface ArchivedSessionPersistence {
   listSnapshots(): Promise<readonly { header: SessionHeader }[]>
   readFrom(sessionId: SessionId, offset: number): Promise<{ events: readonly SessionEvent[] }>
-  delete(sessionId: SessionId, signal?: AbortSignal): Promise<void>
+  delete?(sessionId: SessionId, signal?: AbortSignal): Promise<void>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -146,18 +163,14 @@ function item(
 export class ArchivedSessionsService extends TypertRemoteService {
   static inject = ['workspaceRegistry', 'sessionPersistence', 'sessions', 'agents']
 
+  private readonly archiveAdapter: ArchiveCompatibilityAdapter
+
   constructor(ctx: Context) {
-    // Fail at startup on DSH builds that predate the upstream unarchive
-    // capability. The client half has a matching check; this protects the
-    // host half (including delete cleanup) from calling a missing method.
-    if (typeof ctx.workspaceRegistry.unarchiveSession !== 'function') {
-      throw new Error(
-        'archived-sessions: incompatible DSH version — WorkspaceRegistry.unarchiveSession '
-        + '/ workspace.restoreSession is unavailable. Upgrade DSH to the minimum version '
-        + 'documented in the plugin README.',
-      )
-    }
+    // No startup capability gate: the adapter detects the runtime shape
+    // (official `unarchiveSession`, rc.6 mutation surface, or neither) and
+    // the service degrades to domain results where a capability is missing.
     super(ctx, 'archivedSessions')
+    this.archiveAdapter = new ArchiveCompatibilityAdapter(ctx.workspaceRegistry)
   }
 
   /** List all currently archived sessions with display metadata. */
@@ -209,7 +222,34 @@ export class ArchivedSessionsService extends TypertRemoteService {
     // Default server-side order is by last activity, newest first; the client
     // may re-sort locally without another round trip.
     items.sort((left, right) => right.lastActivityAt - left.lastActivityAt)
-    return { items }
+    return { items, capabilities: this.capabilities() }
+  }
+
+  /** Which runtime paths back restore and permanent delete. */
+  private capabilities(): ArchivedSessionsCapabilities {
+    return {
+      restore: this.archiveAdapter.getRestoreCapability(),
+      delete: typeof this.ctx.sessionPersistence.delete === 'function' ? 'native' : 'unsupported',
+    }
+  }
+
+  /**
+   * Restore one archived session to its original workspace slot. Unsupported
+   * runtimes receive a `restore-unsupported` domain result — never an
+   * exception — so the client can render the capability gap inline.
+   */
+  @Remote('restore')
+  async restore(request: ArchivedSessionRestoreRequest): Promise<ArchivedSessionRestoreValue> {
+    const sessionId = SessionId(request.sessionId)
+    if (this.archiveAdapter.getRestoreCapability() === 'unsupported') {
+      return {
+        code: 'restore-unsupported',
+        sessionId: request.sessionId,
+        message: 'restore is unavailable on this DSH runtime',
+      }
+    }
+    await this.archiveAdapter.restore(sessionId)
+    return { restored: true }
   }
 
   /** Permanently delete one session and its durable history. */
@@ -217,6 +257,18 @@ export class ArchivedSessionsService extends TypertRemoteService {
   async delete(request: ArchivedSessionDeleteRequest): Promise<ArchivedSessionDeleteValue> {
     const ctx = this.ctx
     const sessionId = SessionId(request.sessionId)
+
+    const deleteSession = ctx.sessionPersistence.delete
+    if (deleteSession === undefined) {
+      // The durable-log delete is the authoritative step of this capability;
+      // without it, deleting would have to touch session files directly,
+      // which the plugin never does. Report the gap as a domain result.
+      return {
+        code: 'delete-unsupported',
+        sessionId: request.sessionId,
+        message: 'permanent delete is unavailable on this DSH runtime',
+      }
+    }
 
     const agent = ctx.agents.get(sessionId)
     if (agent?.status === 'running') {
@@ -247,7 +299,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
     // The persistence delete is the authoritative irreversible step. Once it
     // commits, workspace/archive cleanup is best-effort so a cleanup failure
     // cannot report the deletion as failed after the data is gone.
-    await ctx.sessionPersistence.delete(sessionId)
+    await deleteSession(sessionId)
 
     for (const workspace of ctx.workspaceRegistry.list()) {
       try {
@@ -260,7 +312,8 @@ export class ArchivedSessionsService extends TypertRemoteService {
     }
 
     try {
-      await ctx.workspaceRegistry.unarchiveSession(sessionId)
+      // Same archive-set primitive as restore (native or rc.6 path).
+      await this.archiveAdapter.removeFromArchiveSet(sessionId)
     } catch (error: unknown) {
       ctx.logger.warn(
         `archived-sessions: deleted session "${request.sessionId}" could not be removed from the archive set: ${String(error)}`,

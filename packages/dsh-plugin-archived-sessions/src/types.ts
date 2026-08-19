@@ -26,8 +26,20 @@ export interface ArchivedSessionListRequest {
   readonly signal?: AbortSignal
 }
 
+/**
+ * Which runtime path backs each destructive capability, detected by the Host
+ * and shipped with every list so the client can gate the UI without a second
+ * round trip. `restore` also reaches the client through the restore Remote's
+ * domain result; this is the advisory channel that keeps buttons disabled.
+ */
+export interface ArchivedSessionsCapabilities {
+  readonly restore: 'native' | 'rc6-compat' | 'unsupported'
+  readonly delete: 'native' | 'unsupported'
+}
+
 export interface ArchivedSessionListResult {
   readonly items: readonly ArchivedSessionItem[]
+  readonly capabilities: ArchivedSessionsCapabilities
 }
 
 export interface ArchivedSessionDeleteRequest {
@@ -45,6 +57,41 @@ export interface ArchivedSessionRunningError {
   readonly message: string
 }
 
+/**
+ * Domain result for a runtime without `SessionPersistence.delete`: permanent
+ * delete is a supported DSH capability, not a plugin feature, so its absence
+ * is reported (and the UI disables the action) instead of failing startup.
+ */
+export interface ArchivedSessionDeleteUnsupportedError {
+  readonly code: 'delete-unsupported'
+  readonly sessionId: string
+  readonly message: string
+}
+
 export type ArchivedSessionDeleteValue =
   | ArchivedSessionDeleteResult
   | ArchivedSessionRunningError
+  | ArchivedSessionDeleteUnsupportedError
+
+export interface ArchivedSessionRestoreRequest {
+  readonly sessionId: string
+}
+
+export interface ArchivedSessionRestoreResult {
+  readonly restored: true
+}
+
+/**
+ * Domain result for a runtime with no restore path (neither the official
+ * `unarchiveSession` nor the rc.6 mutation surface). Reported as a value —
+ * never thrown — so capability gaps do not look like transport failures.
+ */
+export interface ArchivedSessionUnsupportedError {
+  readonly code: 'restore-unsupported'
+  readonly sessionId: string
+  readonly message: string
+}
+
+export type ArchivedSessionRestoreValue =
+  | ArchivedSessionRestoreResult
+  | ArchivedSessionUnsupportedError

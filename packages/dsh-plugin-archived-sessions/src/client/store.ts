@@ -1,9 +1,13 @@
 /**
  * Archived Sessions client store: a small external store fed by the Host
- * Remote API for listing/deletion and by the official Workspace runtime for
- * restore. It keeps the full fetched list in memory and exposes an
- * append-only `loadedCount` cursor so infinite scroll never replaces already
- * rendered rows.
+ * Remote API for listing / restore / deletion. It keeps the full fetched list
+ * in memory and exposes an append-only `loadedCount` cursor so infinite
+ * scroll never replaces already rendered rows.
+ *
+ * Refresh is split into a full first load (`status: 'loading'`) and quiet
+ * background refreshes (`refreshing: true`): once rows are on screen, a
+ * workspace archive event re-fetches without flashing the page back into a
+ * loading state, and a background failure keeps showing the current rows.
  */
 
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
@@ -12,12 +16,17 @@ import type {
   ArchivedSessionDeleteValue,
   ArchivedSessionItem,
   ArchivedSessionListResult,
+  ArchivedSessionRestoreRequest,
+  ArchivedSessionRestoreValue,
+  ArchivedSessionsCapabilities,
 } from '../types.ts'
 
 export type ArchivedSort = 'lastActivity' | 'createdAt'
 
 export interface ArchivedSessionsState {
   readonly status: 'loading' | 'ready' | 'error'
+  /** True while a background refresh is in flight after the first load. */
+  readonly refreshing: boolean
   /** Full fetched list; the UI renders `items.slice(0, loadedCount)`. */
   readonly items: readonly ArchivedSessionItem[]
   /** Number of rows currently revealed by infinite scroll. */
@@ -25,11 +34,14 @@ export interface ArchivedSessionsState {
   readonly error: string | null
   readonly filter: string
   readonly sort: ArchivedSort
+  /** Host-detected runtime paths; gates the restore / delete buttons. */
+  readonly capabilities: ArchivedSessionsCapabilities
 }
 
 /** Minimal structural Remote face used by the store (avoids a hard import of generated d.ts here). */
 export interface ArchivedSessionsRemote {
   list(): Promise<RemoteResult<ArchivedSessionListResult>>
+  restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
   delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
 }
 
@@ -37,22 +49,24 @@ export const ARCHIVED_SESSIONS_PAGE_SIZE = 20
 
 const INITIAL_STATE: ArchivedSessionsState = {
   status: 'loading',
+  refreshing: false,
   items: [],
   loadedCount: ARCHIVED_SESSIONS_PAGE_SIZE,
   error: null,
   filter: '',
   sort: 'lastActivity',
+  capabilities: { restore: 'unsupported', delete: 'unsupported' },
 }
 
 export class ArchivedSessionsStore {
   private state: ArchivedSessionsState = INITIAL_STATE
   private readonly listeners = new Set<() => void>()
   private refreshPromise: Promise<void> | undefined
+  private readonly remote: ArchivedSessionsRemote
 
-  constructor(
-    private readonly remote: ArchivedSessionsRemote,
-    private readonly restoreSession: (sessionId: string) => Promise<void>,
-  ) {}
+  constructor(remote: ArchivedSessionsRemote) {
+    this.remote = remote
+  }
 
   getSnapshot = (): ArchivedSessionsState => this.state
 
@@ -84,13 +98,20 @@ export class ArchivedSessionsStore {
   }
 
   /**
-   * Restore a session through the official Workspace API, then remove it from
-   * the local list only after the Host confirms success (pessimistic). No full
-   * reload is issued, so scroll position and loaded pages are preserved.
+   * Restore a session through the Host Remote, then remove it from the local
+   * list only after the Host confirms (pessimistic). No full reload is
+   * issued, so scroll position and loaded pages are preserved; a later
+   * archive-set snapshot refresh converges to the same final state.
    */
   async restore(sessionId: string): Promise<void> {
-    await this.restoreSession(sessionId)
-    this.removeById(sessionId)
+    const result = await this.remote.restore({ sessionId })
+    if (!result.ok) throw new Error(result.error.message)
+    if ('restored' in result.value) {
+      this.removeById(sessionId)
+      return
+    }
+    // `restore-unsupported` is a domain result, surfaced as a normal error.
+    throw new Error(result.value.message)
   }
 
   async delete(sessionId: string): Promise<void> {
@@ -116,7 +137,16 @@ export class ArchivedSessionsStore {
   }
 
   private async doRefresh(): Promise<void> {
-    this.state = { ...this.state, status: 'loading', error: null }
+    // First load (no rows yet, not previously ready) may show the full
+    // loading state; once anything was rendered, a refresh is quiet and
+    // keeps `status: 'ready'`, `items`, `loadedCount`, `filter`, `sort`.
+    const firstLoad = this.state.items.length === 0 && this.state.status !== 'ready'
+    this.state = {
+      ...this.state,
+      status: firstLoad ? 'loading' : 'ready',
+      refreshing: !firstLoad,
+      error: null,
+    }
     this.emit()
     try {
       const result = await this.remote.list()
@@ -124,15 +154,21 @@ export class ArchivedSessionsStore {
       this.state = {
         ...this.state,
         status: 'ready',
+        refreshing: false,
         items: result.value.items,
+        capabilities: result.value.capabilities,
         loadedCount: Math.min(this.state.loadedCount, result.value.items.length),
         error: null,
       }
     } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      // Keep showing already-fetched rows on a background failure; only a
+      // first load with nothing to show enters the error state.
       this.state = {
         ...this.state,
-        status: 'error',
-        error: error instanceof Error ? error.message : String(error),
+        status: this.state.items.length > 0 ? 'ready' : 'error',
+        refreshing: false,
+        error: message,
       }
     } finally {
       this.emit()
