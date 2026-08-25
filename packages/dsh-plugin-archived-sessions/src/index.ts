@@ -32,6 +32,10 @@ import type {
   ArchivedSessionsCapabilities,
 } from './types.ts'
 import type { ArchivedSessionRunningError } from './types.ts'
+import type {
+  ArchivedWorkspaceDeleteRequest,
+  ArchivedWorkspaceDeleteValue,
+} from './types.ts'
 
 /** Minimal workspace shape used by the archived-sessions host surface. */
 interface ArchivedWorkspace {
@@ -176,11 +180,16 @@ export class ArchivedSessionsService extends TypertRemoteService {
   /** List all currently archived sessions with display metadata. */
   @Remote('list')
   async list(): Promise<ArchivedSessionListResult> {
+    const items = await this.collectItems()
+    items.sort((left, right) => right.lastActivityAt - left.lastActivityAt)
+    return { items, capabilities: this.capabilities() }
+  }
+
+  /** Build the unsorted archived-session rows shared by list and deleteWorkspace. */
+  private async collectItems(): Promise<ArchivedSessionItem[]> {
     const ctx = this.ctx
     const ids = [...ctx.workspaceRegistry.archivedSessionIds]
 
-    // Cheap header index first; live sessions overlay it (a brand-new session
-    // can be archived before its first durable snapshot lands).
     const snapshots = await ctx.sessionPersistence.listSnapshots()
     const headers = new Map<string, SessionHeader>(
       snapshots.map(snapshot => [snapshot.header.id, snapshot.header]),
@@ -218,11 +227,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
         },
       ))
     }
-
-    // Default server-side order is by last activity, newest first; the client
-    // may re-sort locally without another round trip.
-    items.sort((left, right) => right.lastActivityAt - left.lastActivityAt)
-    return { items, capabilities: this.capabilities() }
+    return items
   }
 
   /** Which runtime paths back restore and permanent delete. */
@@ -258,11 +263,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
     const ctx = this.ctx
     const sessionId = SessionId(request.sessionId)
 
-    const deleteSession = ctx.sessionPersistence.delete
-    if (deleteSession === undefined) {
-      // The durable-log delete is the authoritative step of this capability;
-      // without it, deleting would have to touch session files directly,
-      // which the plugin never does. Report the gap as a domain result.
+    if (typeof ctx.sessionPersistence.delete !== 'function') {
       return {
         code: 'delete-unsupported',
         sessionId: request.sessionId,
@@ -275,30 +276,37 @@ export class ArchivedSessionsService extends TypertRemoteService {
       return this.runningError(request.sessionId)
     }
 
+    await this.deleteOne(sessionId)
+    return { deleted: true }
+  }
+
+  /** Shared single-session irreversible delete used by delete and deleteWorkspace. */
+  private async deleteOne(sessionId: SessionId): Promise<void> {
+    const ctx = this.ctx
+    const agent = ctx.agents.get(sessionId)
     const liveSession = ctx.sessions.get(sessionId)
     if (liveSession !== undefined && agent === undefined) {
       throw new Error(
-        `archived-sessions: cannot delete live session "${request.sessionId}" because no live agent handle is available to detach it`,
+        `archived-sessions: cannot delete live session "${sessionId}" because no live agent handle is available to detach it`,
       )
     }
 
-    // Dispose a live idle agent first so the in-memory Session is detached
-    // before its durable log is removed.
     if (agent !== undefined) {
       const agentLoop = ctx.get('agentLoop') as
         | { disposeAgent(id: SessionId): Promise<boolean> }
         | undefined
       if (agentLoop === undefined) {
         throw new Error(
-          `archived-sessions: cannot delete live session "${request.sessionId}" because the agent loop is not available`,
+          `archived-sessions: cannot delete live session "${sessionId}" because the agent loop is not available`,
         )
       }
       await agentLoop.disposeAgent(sessionId)
     }
 
-    // The persistence delete is the authoritative irreversible step. Once it
-    // commits, workspace/archive cleanup is best-effort so a cleanup failure
-    // cannot report the deletion as failed after the data is gone.
+    const deleteSession = ctx.sessionPersistence.delete
+    if (deleteSession === undefined) {
+      throw new Error('archived-sessions: sessionPersistence.delete disappeared between capability check and delete')
+    }
     await deleteSession(sessionId)
 
     for (const workspace of ctx.workspaceRegistry.list()) {
@@ -306,7 +314,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
         await workspace.detachSession(sessionId)
       } catch (error: unknown) {
         ctx.logger.warn(
-          `archived-sessions: workspace "${workspace.id}" could not detach deleted session "${request.sessionId}": ${String(error)}`,
+          `archived-sessions: workspace "${workspace.id}" could not detach deleted session "${sessionId}": ${String(error)}`,
         )
       }
     }
@@ -316,11 +324,58 @@ export class ArchivedSessionsService extends TypertRemoteService {
       await this.archiveAdapter.removeFromArchiveSet(sessionId)
     } catch (error: unknown) {
       ctx.logger.warn(
-        `archived-sessions: deleted session "${request.sessionId}" could not be removed from the archive set: ${String(error)}`,
+        `archived-sessions: deleted session "${sessionId}" could not be removed from the archive set: ${String(error)}`,
       )
     }
+  }
 
-    return { deleted: true }
+  /** Permanently delete every archived session in one workspace group. */
+  @Remote('deleteWorkspace')
+  async deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<ArchivedWorkspaceDeleteValue> {
+    const ctx = this.ctx
+    const workspaceId = request.workspaceId
+
+    if (typeof ctx.sessionPersistence.delete !== 'function') {
+      return {
+        code: 'workspace-delete-unsupported',
+        workspaceId,
+        message: 'permanent delete is unavailable on this DSH runtime',
+      }
+    }
+
+    const items = (await this.collectItems()).filter(item =>
+      workspaceId === undefined ? item.workspaceId === undefined : item.workspaceId === workspaceId,
+    )
+    const running = items.filter(item => item.running)
+    if (running.length > 0) {
+      return {
+        code: 'workspace-sessions-running',
+        workspaceId,
+        runningSessionCount: running.length,
+        message: `cannot delete workspace group: ${running.length} session(s) are running`,
+      }
+    }
+
+    let deletedCount = 0
+    for (const item of items) {
+      try {
+        await this.deleteOne(SessionId(item.sessionId))
+        deletedCount++
+      } catch (error: unknown) {
+        ctx.logger.warn(
+          `archived-sessions: deleteWorkspace stopped after ${deletedCount} deletion(s); failed on "${item.sessionId}": ${String(error)}`,
+        )
+        return {
+          code: 'workspace-delete-partial',
+          workspaceId,
+          deletedCount,
+          failedSessionId: item.sessionId,
+          message: `deleted ${deletedCount} session(s) before failing on "${item.sessionId}": ${String(error)}`,
+        }
+      }
+    }
+
+    return { deleted: true, deletedCount }
   }
 
   private runningError(sessionId: string): ArchivedSessionRunningError {

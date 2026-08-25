@@ -68,6 +68,45 @@ export interface ArchivedSessionDeleteUnsupportedError {
   readonly message: string
 }
 
+/** One workspace group's bulk delete request. `workspaceId` omitted targets ungrouped archived sessions (未知工作区). */
+export interface ArchivedWorkspaceDeleteRequest {
+  readonly workspaceId?: string
+}
+
+export interface ArchivedWorkspaceDeleteResult {
+  readonly deleted: true
+  readonly deletedCount: number
+}
+
+/** Business failure used by workspace delete when any session in the group is running. */
+export interface ArchivedWorkspaceRunningError {
+  readonly code: 'workspace-sessions-running'
+  readonly workspaceId?: string
+  readonly runningSessionCount: number
+  readonly message: string
+}
+
+export interface ArchivedWorkspaceDeleteUnsupportedError {
+  readonly code: 'workspace-delete-unsupported'
+  readonly workspaceId?: string
+  readonly message: string
+}
+
+/** Non-running delete failure after some sessions were already irreversibly deleted. */
+export interface ArchivedWorkspaceDeletePartialError {
+  readonly code: 'workspace-delete-partial'
+  readonly workspaceId?: string
+  readonly deletedCount: number
+  readonly failedSessionId: string
+  readonly message: string
+}
+
+export type ArchivedWorkspaceDeleteValue =
+  | ArchivedWorkspaceDeleteResult
+  | ArchivedWorkspaceRunningError
+  | ArchivedWorkspaceDeleteUnsupportedError
+  | ArchivedWorkspaceDeletePartialError
+
 export type ArchivedSessionDeleteValue =
   | ArchivedSessionDeleteResult
   | ArchivedSessionRunningError

@@ -145,3 +145,121 @@ test('future native runtime: service reports native restore capability', async (
   const result = await service.list()
   assert.equal(result.capabilities.restore, 'native')
 })
+
+interface FakeWorkspace {
+  id: string
+  title: string
+  path: string
+  sessionIds: string[]
+  detachSession(sessionId: SessionId): Promise<void> | void
+}
+
+function makeWorkspaceContext(initial: {
+  archivedSessionIds?: string[]
+  workspaces?: FakeWorkspace[]
+} = {}) {
+  const state: FakeState = {
+    workspaceIds: [],
+    archivedSessionIds: [...(initial.archivedSessionIds ?? [])],
+  }
+  const ctx: FakeContext = {
+    workspaceRegistry: {
+      get archivedSessionIds() {
+        return state.archivedSessionIds
+      },
+      list: () => initial.workspaces ?? [],
+      async enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+        return await operation()
+      },
+      requireState: () => state,
+      async setState(next: unknown): Promise<void> {
+        Object.assign(state, next as Partial<FakeState>)
+      },
+    },
+    sessionPersistence: {
+      listSnapshots: async () =>
+        (initial.archivedSessionIds ?? []).map(id => ({
+          header: { id: id as SessionId, createdAt: 1_700_000_000_000 },
+        })),
+      readFrom: async () => ({ events: [] }),
+      delete: async () => {},
+    },
+    sessions: { get: () => undefined },
+    agents: { get: () => undefined },
+    get: () => undefined,
+    logger: { warn: () => {} },
+    reflect: { provide: () => {} },
+  }
+  return { ctx, state }
+}
+
+test('deleteWorkspace: deletes every archived session in the workspace and returns the count', async () => {
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1', 'a-2', 'b-1'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1', 'a-2'], detachSession: async () => {} },
+      { id: 'b', title: 'B', path: '/b', sessionIds: ['b-1'], detachSession: async () => {} },
+    ],
+  })
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.deepEqual(result, { deleted: true, deletedCount: 2 })
+  assert.deepEqual(state.archivedSessionIds, ['b-1'])
+})
+
+test('deleteWorkspace: aborts the whole group when any session is running', async () => {
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1', 'a-2'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1', 'a-2'], detachSession: async () => {} },
+    ],
+  })
+  ctx.agents.get = (sessionId: SessionId) =>
+    sessionId === 'a-1' ? { status: 'running' } : undefined
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.equal(result.code, 'workspace-sessions-running')
+  assert.equal(result.runningSessionCount, 1)
+  assert.deepEqual(state.archivedSessionIds, ['a-1', 'a-2'])
+})
+
+test('deleteWorkspace: ungrouped sessions delete when no workspaceId is sent', async () => {
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['u-1', 'a-1'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1'], detachSession: async () => {} },
+    ],
+  })
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({})
+  assert.deepEqual(result, { deleted: true, deletedCount: 1 })
+  assert.deepEqual(state.archivedSessionIds, ['a-1'])
+})
+
+test('deleteWorkspace: reports partial progress when a session delete fails', async () => {
+  let deleteCalls = 0
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1', 'a-2'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1', 'a-2'], detachSession: async () => {} },
+    ],
+  })
+  ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
+    deleteCalls++
+    if (sessionId === 'a-2') throw new Error('storage boom')
+  }
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.equal(result.code, 'workspace-delete-partial')
+  assert.equal(result.deletedCount, 1)
+  assert.equal(result.failedSessionId, 'a-2')
+  assert.deepEqual(state.archivedSessionIds, ['a-2'])
+})
+
+test('deleteWorkspace: answers workspace-delete-unsupported when persistence delete is missing', async () => {
+  const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['a-1'] })
+  delete ctx.sessionPersistence.delete
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.equal(result.code, 'workspace-delete-unsupported')
+})
