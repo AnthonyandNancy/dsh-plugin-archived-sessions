@@ -81,21 +81,21 @@ export interface ArchivedWorkspaceDeleteResult {
 /** Business failure used by workspace delete when any session in the group is running. */
 export interface ArchivedWorkspaceRunningError {
   readonly code: 'workspace-sessions-running'
-  readonly workspaceId?: string
+  readonly workspaceId?: string | undefined
   readonly runningSessionCount: number
   readonly message: string
 }
 
 export interface ArchivedWorkspaceDeleteUnsupportedError {
   readonly code: 'workspace-delete-unsupported'
-  readonly workspaceId?: string
+  readonly workspaceId?: string | undefined
   readonly message: string
 }
 
 /** Non-running delete failure after some sessions were already irreversibly deleted. */
 export interface ArchivedWorkspaceDeletePartialError {
   readonly code: 'workspace-delete-partial'
-  readonly workspaceId?: string
+  readonly workspaceId?: string | undefined
   readonly deletedCount: number
   readonly failedSessionId: string
   readonly message: string
