@@ -32,7 +32,7 @@ interface FakeContext {
     delete?: (sessionId: SessionId) => Promise<void>
   }
   sessions: { get(): undefined }
-  agents: { get(): undefined }
+  agents: { get(sessionId?: SessionId): { status?: 'idle' | 'running' } | undefined }
   get(): undefined
   logger: { warn(...args: unknown[]): void }
   reflect: { provide(): void }
@@ -247,6 +247,31 @@ test('deleteWorkspace: reports partial progress when a session delete fails', as
   ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
     deleteCalls++
     if (sessionId === 'a-2') throw new Error('storage boom')
+  }
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.equal(result.code, 'workspace-delete-partial')
+  assert.equal(result.deletedCount, 1)
+  assert.equal(result.failedSessionId, 'a-2')
+  assert.deepEqual(state.archivedSessionIds, ['a-2'])
+})
+
+test('deleteWorkspace: re-checks running state during the loop and reports partial if a session becomes running', async () => {
+  let deleteCalls = 0
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1', 'a-2'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1', 'a-2'], detachSession: async () => {} },
+    ],
+  })
+  ctx.agents.get = (sessionId: SessionId) => {
+    if (sessionId === 'a-2' && deleteCalls > 0) return { status: 'running' }
+    return undefined
+  }
+  ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
+    deleteCalls++
+    if (sessionId === 'a-1') return
+    throw new Error('unreachable')
   }
   const service = startService(ctx)
   const result = await service.deleteWorkspace({ workspaceId: 'a' })

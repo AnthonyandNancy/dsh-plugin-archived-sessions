@@ -358,6 +358,23 @@ export class ArchivedSessionsService extends TypertRemoteService {
 
     let deletedCount = 0
     for (const item of items) {
+      if (ctx.agents.get(SessionId(item.sessionId))?.status === 'running') {
+        if (deletedCount === 0) {
+          return {
+            code: 'workspace-sessions-running',
+            workspaceId,
+            runningSessionCount: 1,
+            message: `cannot delete workspace group: session "${item.sessionId}" became running`,
+          }
+        }
+        return {
+          code: 'workspace-delete-partial',
+          workspaceId,
+          deletedCount,
+          failedSessionId: item.sessionId,
+          message: `deleted ${deletedCount} session(s) before aborting because "${item.sessionId}" became running`,
+        }
+      }
       try {
         await this.deleteOne(SessionId(item.sessionId))
         deletedCount++

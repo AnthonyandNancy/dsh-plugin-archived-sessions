@@ -51,6 +51,15 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
   return { promise, resolve, reject }
 }
 
+async function captureRejection(fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await fn()
+  } catch (error) {
+    return error
+  }
+  assert.fail('expected promise to reject')
+}
+
 function makeRemote(overrides: Partial<ArchivedSessionsRemote> = {}): ArchivedSessionsRemote & {
   listCalls: () => number
 } {
@@ -284,7 +293,7 @@ test('deleteWorkspace removes ungrouped sessions when workspaceId is undefined',
   assert.equal(state.items[0]?.workspaceId, 'a')
 })
 
-test('deleteWorkspace surfaces running abort and keeps the list', async () => {
+test('deleteWorkspace surfaces running abort with code and count and keeps the list', async () => {
   const items = [makeWorkspaceItem('a', 'A-1', 1)]
   const store = new ArchivedSessionsStore(makeRemote({
     list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
@@ -294,7 +303,50 @@ test('deleteWorkspace surfaces running abort and keeps the list', async () => {
     }),
   }))
   await store.refresh()
-  await assert.rejects(() => store.deleteWorkspace('a'), /session is running/)
+  const error = await captureRejection(() => store.deleteWorkspace('a'))
+  assert.equal((error as { code?: string }).code, 'workspace-sessions-running')
+  assert.equal((error as { runningSessionCount?: number }).runningSessionCount, 1)
   assert.equal(store.getSnapshot().items.length, 1)
+})
+
+test('deleteWorkspace surfaces partial failure metadata and refreshes the list', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeWorkspaceItem('a', 'A-2', 2),
+  ]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspace: async () => ({
+      ok: true,
+      value: { code: 'workspace-delete-partial', deletedCount: 1, failedSessionId: 'A-1', message: 'partial' },
+    }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+  const error = await captureRejection(() => store.deleteWorkspace('a'))
+  assert.equal((error as { code?: string }).code, 'workspace-delete-partial')
+  assert.equal((error as { deletedCount?: number }).deletedCount, 1)
+  assert.equal(remote.listCalls(), 2) // initial refresh + reconciliation refresh
+})
+
+test('deleteWorkspace surfaces workspace-delete-unsupported with code', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspace: async () => ({
+      ok: true,
+      value: { code: 'workspace-delete-unsupported', message: 'unsupported' },
+    }),
+  }))
+  const error = await captureRejection(() => store.deleteWorkspace('a'))
+  assert.equal((error as { code?: string }).code, 'workspace-delete-unsupported')
+})
+
+test('deleteWorkspace surfaces transport failure', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspace: async () => ({
+      ok: false,
+      error: { code: 'transport', message: 'boom', details: {} },
+    }),
+  }))
+  await assert.rejects(() => store.deleteWorkspace('a'), /boom/)
 })
 

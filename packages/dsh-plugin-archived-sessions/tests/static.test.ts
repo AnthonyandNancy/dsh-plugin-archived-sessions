@@ -109,7 +109,7 @@ test('no version-string capability detection', () => {
   }
 })
 
-test('restore / capabilities wire types are present in the built declarations', () => {
+test('restore / capabilities / workspace-delete wire types are present in the built declarations', () => {
   const dts = readFileSync(join(SRC_ROOT, '..', 'lib', 'types', 'types.d.ts'), 'utf8')
   assert.match(dts, /interface ArchivedSessionRestoreRequest/)
   assert.match(dts, /interface ArchivedSessionRestoreResult/)

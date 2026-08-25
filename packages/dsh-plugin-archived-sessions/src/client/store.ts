@@ -128,7 +128,14 @@ export class ArchivedSessionsStore {
       return
     }
     const error = new Error(result.value.message)
-    Object.assign(error, { code: result.value.code })
+    Object.assign(error, result.value)
+    if (result.value.code === 'workspace-delete-partial') {
+      try {
+        await this.refresh()
+      } catch {
+        // Keep the original partial-delete error; refresh failure must not mask it.
+      }
+    }
     throw error
   }
 
