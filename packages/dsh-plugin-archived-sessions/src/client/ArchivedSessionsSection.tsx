@@ -86,15 +86,24 @@ const groupContainerStyle: CSSProperties = {
 const groupHeaderStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  justifyContent: 'space-between',
+  gap: '8px',
   width: '100%',
+  padding: '12px 4px',
+}
+
+const groupHeaderToggleStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  flex: 1,
+  minWidth: 0,
   border: 0,
   background: 'transparent',
   font: 'inherit',
   color: 'inherit',
   cursor: 'pointer',
   textAlign: 'left',
-  padding: '12px 4px',
+  padding: 0,
 }
 
 const groupContentStyle: CSSProperties = {
@@ -125,13 +134,6 @@ const groupCountStyle: CSSProperties = {
   margin: 0,
   fontSize: '12px',
   color: 'var(--dsw-alias-text-secondary)',
-}
-
-const groupActionsStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  flexShrink: 0,
 }
 
 export function ArchivedSessionsSection({
@@ -307,37 +309,36 @@ export function ArchivedSessionsSection({
 
         return (
           <section key={group.key} style={groupContainerStyle}>
-            <button
-              type="button"
-              aria-expanded={expanded}
-              style={groupHeaderStyle}
-              onClick={() => { toggleGroup(group.key) }}
-            >
-              <span style={groupHeadingStyle}>
-                <Chevron expanded={expanded} />
-                <span style={groupTitleStyle}>{group.title}</span>
-              </span>
-              <span style={groupActionsStyle}>
+            <div style={groupHeaderStyle}>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                style={groupHeaderToggleStyle}
+                onClick={() => { toggleGroup(group.key) }}
+              >
+                <span style={groupHeadingStyle}>
+                  <Chevron expanded={expanded} />
+                  <span style={groupTitleStyle}>{group.title}</span>
+                </span>
                 <span style={groupCountStyle}>
                   {group.items.length} {t('sessionCount')}
                 </span>
-                {!searching && (
-                  <Button
-                    variant="ghost"
-                    style={{ color: 'var(--dsw-alias-state-error-primary)' }}
-                    disabled={busyId === `workspace:${group.key}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      setDeleting(null)
-                      setDeletingWorkspace(group)
-                      setAcknowledged(false)
-                    }}
-                  >
-                    {busyId === `workspace:${group.key}` ? t('deletingWorkspace') : t('deleteWorkspace')}
-                  </Button>
-                )}
-              </span>
-            </button>
+              </button>
+              {!searching && (
+                <Button
+                  variant="ghost"
+                  style={{ color: 'var(--dsw-alias-state-error-primary)' }}
+                  disabled={busyId === `workspace:${group.key}`}
+                  onClick={() => {
+                    setDeleting(null)
+                    setDeletingWorkspace(group)
+                    setAcknowledged(false)
+                  }}
+                >
+                  {busyId === `workspace:${group.key}` ? t('deletingWorkspace') : t('deleteWorkspace')}
+                </Button>
+              )}
+            </div>
             {expanded && (
               <div style={groupContentStyle}>
                 {visibleGroupItems.map(item => (
