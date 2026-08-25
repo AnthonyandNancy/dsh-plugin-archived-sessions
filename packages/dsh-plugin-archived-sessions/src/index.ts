@@ -87,6 +87,28 @@ declare module '@deepseek-ai/cordis' {
 /** Cap for the fallback title text derived from a first user message. */
 const FALLBACK_TITLE_MAX_CHARS = 48
 
+/**
+ * Thrown by {@link ArchivedSessionsService.deleteOne} when a session becomes
+ * running between an entry point's capability/preflight check and the actual
+ * deletion. Entry points translate this into `session-running` /
+ * `workspace-sessions-running` domain results instead of deleting a live
+ * session.
+ */
+class SessionRunningError extends Error {
+  readonly code = 'session-running' as const
+  readonly sessionId: string
+
+  constructor(sessionId: string) {
+    super(`cannot delete session "${sessionId}": session is running`)
+    this.name = 'SessionRunningError'
+    this.sessionId = sessionId
+  }
+}
+
+function isSessionRunningError(error: unknown): error is SessionRunningError {
+  return error instanceof SessionRunningError
+}
+
 /** Extract plain text from a user message's content blocks, if representable. */
 function firstUserText(events: readonly SessionEvent[]): string | undefined {
   for (const event of events) {
@@ -276,7 +298,16 @@ export class ArchivedSessionsService extends TypertRemoteService {
       return this.runningError(request.sessionId)
     }
 
-    await this.deleteOne(sessionId)
+    try {
+      await this.deleteOne(sessionId)
+    } catch (error: unknown) {
+      // Second protection: the session may have become running after the
+      // check above and before deleteOne inspected it.
+      if (isSessionRunningError(error)) {
+        return this.runningError(request.sessionId)
+      }
+      throw error
+    }
     return { deleted: true }
   }
 
@@ -284,6 +315,11 @@ export class ArchivedSessionsService extends TypertRemoteService {
   private async deleteOne(sessionId: SessionId): Promise<void> {
     const ctx = this.ctx
     const agent = ctx.agents.get(sessionId)
+    if (agent?.status === 'running') {
+      // Last line of defense for every delete entry point: never dispose or
+      // delete a session whose agent is currently running.
+      throw new SessionRunningError(sessionId as string)
+    }
     const liveSession = ctx.sessions.get(sessionId)
     if (liveSession !== undefined && agent === undefined) {
       throw new Error(
@@ -348,10 +384,13 @@ export class ArchivedSessionsService extends TypertRemoteService {
     )
     const running = items.filter(item => item.running)
     if (running.length > 0) {
+      const firstRunning = running[0]!
       return {
         code: 'workspace-sessions-running',
         workspaceId,
         runningSessionCount: running.length,
+        sessionId: firstRunning.sessionId,
+        title: firstRunning.title,
         message: `cannot delete workspace group: ${running.length} session(s) are running`,
       }
     }
@@ -364,6 +403,8 @@ export class ArchivedSessionsService extends TypertRemoteService {
             code: 'workspace-sessions-running',
             workspaceId,
             runningSessionCount: 1,
+            sessionId: item.sessionId,
+            title: item.title,
             message: `cannot delete workspace group: session "${item.sessionId}" became running`,
           }
         }
@@ -382,6 +423,18 @@ export class ArchivedSessionsService extends TypertRemoteService {
         ctx.logger.warn(
           `archived-sessions: deleteWorkspace stopped after ${deletedCount} deletion(s); failed on "${item.sessionId}": ${String(error)}`,
         )
+        if (isSessionRunningError(error) && deletedCount === 0) {
+          // A running session slipped past the loop re-check but deleteOne's
+          // own guard caught it before anything was deleted.
+          return {
+            code: 'workspace-sessions-running',
+            workspaceId,
+            runningSessionCount: 1,
+            sessionId: item.sessionId,
+            title: item.title,
+            message: `cannot delete workspace group: session "${item.sessionId}" became running`,
+          }
+        }
         return {
           code: 'workspace-delete-partial',
           workspaceId,

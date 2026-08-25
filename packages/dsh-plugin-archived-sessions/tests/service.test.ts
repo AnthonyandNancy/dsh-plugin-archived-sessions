@@ -138,6 +138,54 @@ test('future native runtime: delete cleanup calls the official unarchiveSession'
   assert.deepEqual(state.archivedSessionIds, ['B'])
 })
 
+test('delete: removes one session, keeps the rest, and detaches it from workspace accounting', async () => {
+  const deleted: string[] = []
+  const workspace = {
+    id: 'workspace-a',
+    title: 'A',
+    path: '/a',
+    sessionIds: ['s1', 's2'],
+    async detachSession(sessionId: SessionId): Promise<void> {
+      workspace.sessionIds = workspace.sessionIds.filter(id => id !== sessionId)
+    },
+  }
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['s1', 's2'],
+    workspaces: [workspace],
+  })
+  ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
+    deleted.push(sessionId as string)
+  }
+  const service = startService(ctx)
+
+  const result = await service.delete({ sessionId: 's1' })
+
+  assert.deepEqual(result, { deleted: true })
+  assert.deepEqual(deleted, ['s1'])
+  assert.deepEqual(workspace.sessionIds, ['s2'])
+  assert.deepEqual(state.archivedSessionIds, ['s2'])
+})
+
+test('delete: second protection inside deleteOne rejects a session that became running after the first check', async () => {
+  let agentChecks = 0
+  let deleteCalls = 0
+  const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['s1'] })
+  ctx.agents.get = () => {
+    agentChecks++
+    return agentChecks > 1 ? { status: 'running' } : undefined
+  }
+  ctx.sessionPersistence.delete = async () => {
+    deleteCalls++
+  }
+  const service = startService(ctx)
+
+  const result = await service.delete({ sessionId: 's1' })
+
+  assert.equal(result.code, 'session-running')
+  assert.equal(result.sessionId, 's1')
+  assert.equal(deleteCalls, 0)
+})
+
 test('future native runtime: service reports native restore capability', async () => {
   const { ctx } = makeRc6Context()
   ctx.workspaceRegistry.unarchiveSession = async () => {}
@@ -220,20 +268,34 @@ test('deleteWorkspace: aborts the whole group when any session is running', asyn
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
   assert.equal(result.code, 'workspace-sessions-running')
   assert.equal(result.runningSessionCount, 1)
+  assert.equal(result.sessionId, 'a-1')
+  assert.equal(typeof result.title, 'string')
+  assert.equal(result.title, '会话 a-1')
   assert.deepEqual(state.archivedSessionIds, ['a-1', 'a-2'])
 })
 
 test('deleteWorkspace: ungrouped sessions delete when no workspaceId is sent', async () => {
   const { ctx, state } = makeWorkspaceContext({
-    archivedSessionIds: ['u-1', 'a-1'],
+    archivedSessionIds: ['u-1', 'u-2', 'a-1'],
     workspaces: [
       { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1'], detachSession: async () => {} },
     ],
   })
   const service = startService(ctx)
   const result = await service.deleteWorkspace({})
-  assert.deepEqual(result, { deleted: true, deletedCount: 1 })
+  assert.deepEqual(result, { deleted: true, deletedCount: 2 })
   assert.deepEqual(state.archivedSessionIds, ['a-1'])
+})
+
+test('deleteWorkspace: empty-string workspaceId is not treated as the ungrouped group', async () => {
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['u-1'],
+    workspaces: [],
+  })
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: '' })
+  assert.deepEqual(result, { deleted: true, deletedCount: 0 })
+  assert.deepEqual(state.archivedSessionIds, ['u-1'])
 })
 
 test('deleteWorkspace: reports partial progress when a session delete fails', async () => {

@@ -68,7 +68,12 @@ export interface ArchivedSessionDeleteUnsupportedError {
   readonly message: string
 }
 
-/** One workspace group's bulk delete request. `workspaceId` omitted targets ungrouped archived sessions (未知工作区). */
+/**
+ * One workspace group's bulk delete request.
+ *
+ * workspaceId omitted means the ungrouped / unknown-workspace
+ * archived-session group.
+ */
 export interface ArchivedWorkspaceDeleteRequest {
   readonly workspaceId?: string
 }
@@ -83,6 +88,10 @@ export interface ArchivedWorkspaceRunningError {
   readonly code: 'workspace-sessions-running'
   readonly workspaceId?: string | undefined
   readonly runningSessionCount: number
+  /** Id of the first running session found by the preflight (when known). */
+  readonly sessionId?: string
+  /** Display title of the first running session found by the preflight (when known). */
+  readonly title?: string
   readonly message: string
 }
 

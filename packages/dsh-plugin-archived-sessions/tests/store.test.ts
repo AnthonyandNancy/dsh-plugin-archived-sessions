@@ -159,6 +159,79 @@ test('restore surfaces restore-unsupported as a normal error and keeps the row',
   assert.equal(store.getSnapshot().items.length, 10)
 })
 
+test('delete removes only the deleted row after the Host confirms', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeWorkspaceItem('a', 'A-2', 2),
+    makeWorkspaceItem('b', 'B-1', 3),
+  ]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.delete('a-1')
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 2)
+  assert.equal(state.items.some(item => item.sessionId === 'a-1'), false)
+  assert.equal(remote.listCalls(), 1)
+})
+
+test('delete is pessimistic: the row stays visible until the Host resolves success', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('a', 'A-2', 2)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  const gate = deferred<{ ok: true; value: { deleted: true } }>()
+  remote.delete = () => gate.promise
+  const pending = store.delete('a-1')
+  assert.equal(store.getSnapshot().items.length, 2)
+
+  gate.resolve({ ok: true, value: { deleted: true } })
+  await pending
+  assert.equal(store.getSnapshot().items.length, 1)
+})
+
+test('delete failure keeps every row in the local list', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('a', 'A-2', 2)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    delete: async () => ({
+      ok: true,
+      value: { code: 'delete-unsupported', sessionId: 'a-1', message: 'permanent delete is unavailable on this DSH runtime' },
+    }),
+  }))
+  await store.refresh()
+
+  const error = await captureRejection(() => store.delete('a-1'))
+  assert.equal((error as { message?: string }).message, 'permanent delete is unavailable on this DSH runtime')
+  assert.equal(store.getSnapshot().items.length, 2)
+})
+
+test('deleteWorkspace(undefined) sends an empty object, not a wildcard', async () => {
+  let capturedRequest: unknown
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeItem(2),
+    makeItem(3),
+  ]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspace: async request => {
+      capturedRequest = request
+      return { ok: true, value: { deleted: true, deletedCount: 2 } }
+    },
+  }))
+  await store.refresh()
+  await store.deleteWorkspace(undefined)
+  assert.deepEqual(capturedRequest, {})
+  assert.equal(store.getSnapshot().items.length, 1)
+})
+
 test('background refresh failure keeps current rows visible and records the error', async () => {
   const remote = makeRemote({ list: async () => ({ ok: true, value: listResult(60) }) })
   const store = new ArchivedSessionsStore(remote)

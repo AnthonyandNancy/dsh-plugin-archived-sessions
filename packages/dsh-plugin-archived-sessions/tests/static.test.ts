@@ -149,3 +149,19 @@ test('workspace delete uses RiskConfirmation and surfaces running/partial errors
   assert.match(sectionSource, /deleteWorkspacePartial/)
   assert.match(sectionSource, /deleteWorkspaceUnavailable/)
 })
+
+test('session row delete uses RiskConfirmation and is disabled while running', () => {
+  assert.match(sectionSource, /setDeleting\(item\)/)
+  assert.match(sectionSource, /disabled=\{\s*busyId === item\.sessionId\s*\|\|\s*item\.running/)
+  assert.match(sectionSource, /store\.delete\(target\.sessionId\)/)
+})
+
+test('unknown workspace header keeps the workspace delete entry', () => {
+  assert.match(sectionSource, /target\.key === '__ungrouped__' \? undefined : target\.key/)
+  assert.doesNotMatch(sectionSource, /if \(!workspaceId\) return null/)
+  assert.match(sectionSource, /store\.deleteWorkspace\(workspaceKey\)/)
+})
+
+test('delete and workspace delete buttons are gated on the host delete capability', () => {
+  assert.match(sectionSource, /state\.capabilities\.delete !== 'native'/)
+})

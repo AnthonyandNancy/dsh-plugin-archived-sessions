@@ -243,11 +243,17 @@ export function ArchivedSessionsSection({
         console.error('archived-sessions: archivedSessions/deleteWorkspace failed', error)
         const code = (error as { code?: string }).code
         if (code === 'workspace-sessions-running') {
-          const count = (error as { runningSessionCount?: number }).runningSessionCount
-          setActionError(`${t('deleteWorkspaceRunning')}${count !== undefined ? `（${count}）` : ''}`)
+          const running = error as { runningSessionCount?: number; sessionId?: string; title?: string }
+          const count = running.runningSessionCount
+          const name = running.title ?? running.sessionId
+          setActionError(
+            `${t('deleteWorkspaceRunning')}${count !== undefined ? `（${count}）` : ''}${name !== undefined ? `：${name}` : ''}`,
+          )
         } else if (code === 'workspace-delete-partial') {
           const partial = error as { deletedCount?: number; failedSessionId?: string }
-          setActionError(`${t('deleteWorkspacePartial')}${partial.deletedCount !== undefined ? `（${partial.deletedCount}）` : ''}`)
+          setActionError(
+            `${t('deleteWorkspacePartial')}${partial.deletedCount !== undefined ? `（${partial.deletedCount}）` : ''}${partial.failedSessionId !== undefined ? `：${partial.failedSessionId}` : ''}`,
+          )
         } else if (code === 'workspace-delete-unsupported') {
           setActionError(t('deleteWorkspaceUnavailable'))
         } else {
@@ -328,7 +334,11 @@ export function ArchivedSessionsSection({
                 <Button
                   variant="ghost"
                   style={{ color: 'var(--dsw-alias-state-error-primary)' }}
-                  disabled={busyId === `workspace:${group.key}`}
+                  disabled={
+                    busyId === `workspace:${group.key}`
+                    || state.capabilities.delete !== 'native'
+                  }
+                  title={state.capabilities.delete !== 'native' ? t('deleteUnavailable') : undefined}
                   onClick={() => {
                     setDeleting(null)
                     setDeletingWorkspace(group)
@@ -365,7 +375,12 @@ export function ArchivedSessionsSection({
                       <Button
                         variant="ghost"
                         style={{ color: 'var(--dsw-alias-state-error-primary)' }}
-                        disabled={busyId === item.sessionId || item.running}
+                        disabled={
+                          busyId === item.sessionId
+                          || item.running
+                          || state.capabilities.delete !== 'native'
+                        }
+                        title={state.capabilities.delete !== 'native' ? t('deleteUnavailable') : undefined}
                         onClick={() => {
                           setDeleting(item)
                           setAcknowledged(false)
@@ -408,7 +423,14 @@ export function ArchivedSessionsSection({
         <RiskConfirmation
           open
           title={t('deleteWorkspaceTitle')}
-          description={`${t('workspace')}: ${deletingWorkspace.title}\n${deletingWorkspace.items.length} ${t('sessionCount')} · ${t('deleteWorkspaceDescription')}`}
+          description={
+            t('deleteWorkspaceConfirmBody')
+              .replace('{title}', deletingWorkspace.title)
+              .replace('{count}', String(deletingWorkspace.items.length))
+            + (deletingWorkspace.key === '__ungrouped__'
+              ? ''
+              : `\n\n${t('deleteWorkspaceConfirmNote')}`)
+          }
           acknowledgeLabel={t('deleteWorkspaceAcknowledge')}
           cancelLabel={t('cancel')}
           confirmLabel={t('confirmDelete')}

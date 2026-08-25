@@ -107,7 +107,7 @@
     "build:host": "tsc -b tsconfig.build.host.json && tsdown --env.DSH_BUILD_FACE host",
     "build:client": "tsc -b tsconfig.build.client.json && tsdown --env.DSH_BUILD_FACE client",
     "check:typert": "node scripts/check-typert-contract.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.build.host.json && tsc --noEmit -p tsconfig.build.client.json",
     "test": "tsc -b tsconfig.build.host.json && node --test tests/restore-adapter.test.ts tests/service.test.ts tests/store.test.ts tests/static.test.ts",
     "prepack": "npm run build",
     "pack": "npm pack"
