@@ -117,12 +117,17 @@ test('restore / capabilities wire types are present in the built declarations', 
   assert.match(dts, /interface ArchivedSessionDeleteUnsupportedError/)
   assert.match(dts, /interface ArchivedSessionsCapabilities/)
   assert.match(dts, /restore: 'native' \| 'rc6-compat' \| 'unsupported'/)
+  assert.match(dts, /interface ArchivedWorkspaceDeleteRequest/)
+  assert.match(dts, /interface ArchivedWorkspaceDeleteResult/)
+  assert.match(dts, /code: 'workspace-sessions-running'/)
+  assert.match(dts, /code: 'workspace-delete-unsupported'/)
+  assert.match(dts, /code: 'workspace-delete-partial'/)
 })
 
 test('built Host and Client Typert artifacts contain all strict endpoints', () => {
   for (const relativePath of ['lib/typert.host.js', 'lib/typert.remote-client.js']) {
     const artifact = readFileSync(join(SRC_ROOT, '..', relativePath), 'utf8')
-    for (const method of ['list', 'restore', 'delete']) {
+    for (const method of ['list', 'restore', 'delete', 'deleteWorkspace']) {
       const endpoint = `archivedSessions/${method}`
       const start = artifact.indexOf(endpoint)
       assert.notEqual(start, -1, `${relativePath} is missing ${endpoint}`)
