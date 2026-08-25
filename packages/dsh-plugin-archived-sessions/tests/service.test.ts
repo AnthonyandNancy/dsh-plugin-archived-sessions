@@ -268,17 +268,39 @@ test('deleteWorkspace: re-checks running state during the loop and reports parti
     if (sessionId === 'a-2' && deleteCalls > 0) return { status: 'running' }
     return undefined
   }
-  ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
+  ctx.sessionPersistence.delete = async () => {
     deleteCalls++
-    if (sessionId === 'a-1') return
-    throw new Error('unreachable')
   }
   const service = startService(ctx)
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
   assert.equal(result.code, 'workspace-delete-partial')
   assert.equal(result.deletedCount, 1)
   assert.equal(result.failedSessionId, 'a-2')
+  assert.equal(deleteCalls, 1)
   assert.deepEqual(state.archivedSessionIds, ['a-2'])
+})
+
+test('deleteWorkspace: aborts with workspace-sessions-running if the first session becomes running before deletion', async () => {
+  let agentCalls = 0
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1'], detachSession: async () => {} },
+    ],
+  })
+  ctx.agents.get = (sessionId: SessionId) => {
+    agentCalls++
+    if (sessionId === 'a-1' && agentCalls > 1) return { status: 'running' }
+    return undefined
+  }
+  ctx.sessionPersistence.delete = async () => {
+    throw new Error('should not be called')
+  }
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.equal(result.code, 'workspace-sessions-running')
+  assert.equal(result.runningSessionCount, 1)
+  assert.deepEqual(state.archivedSessionIds, ['a-1'])
 })
 
 test('deleteWorkspace: answers workspace-delete-unsupported when persistence delete is missing', async () => {

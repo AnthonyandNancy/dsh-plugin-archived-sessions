@@ -315,7 +315,12 @@ test('deleteWorkspace surfaces partial failure metadata and refreshes the list',
     makeWorkspaceItem('a', 'A-2', 2),
   ]
   const remote = makeRemote({
-    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    list: async () => {
+      if (remote.listCalls() === 1) {
+        return { ok: true, value: { items, capabilities: CAPABILITIES } }
+      }
+      return { ok: true, value: { items: [items[1]!], capabilities: CAPABILITIES } }
+    },
     deleteWorkspace: async () => ({
       ok: true,
       value: { code: 'workspace-delete-partial', deletedCount: 1, failedSessionId: 'A-1', message: 'partial' },
@@ -326,7 +331,10 @@ test('deleteWorkspace surfaces partial failure metadata and refreshes the list',
   const error = await captureRejection(() => store.deleteWorkspace('a'))
   assert.equal((error as { code?: string }).code, 'workspace-delete-partial')
   assert.equal((error as { deletedCount?: number }).deletedCount, 1)
-  assert.equal(remote.listCalls(), 2) // initial refresh + reconciliation refresh
+  assert.equal(remote.listCalls(), 2) // initial refresh + fresh reconciliation refresh
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 1)
+  assert.equal(state.items[0]?.sessionId, 'a-2')
 })
 
 test('deleteWorkspace surfaces workspace-delete-unsupported with code', async () => {

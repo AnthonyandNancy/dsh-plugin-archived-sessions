@@ -130,6 +130,17 @@ export class ArchivedSessionsStore {
     const error = new Error(result.value.message)
     Object.assign(error, result.value)
     if (result.value.code === 'workspace-delete-partial') {
+      // A concurrent workspace-archive refresh may already be in flight and
+      // could have been issued before these deletions committed. Wait for it,
+      // then run a fresh refresh so the local list converges.
+      if (this.refreshPromise !== undefined) {
+        try {
+          await this.refreshPromise
+        } catch {
+          // Ignore the earlier refresh's failure; the fresh one below is what
+          // reconciles this deletion result.
+        }
+      }
       try {
         await this.refresh()
       } catch {
