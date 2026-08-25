@@ -269,6 +269,43 @@ test('deleteWorkspace: deletes every archived session in the workspace and retur
   assert.deepEqual(state.archivedSessionIds, ['b-1'])
 })
 
+test('deleteWorkspace: keeps the real Workspace registration and project directory intact', async () => {
+  const workspaceA = {
+    id: 'a',
+    title: 'A',
+    path: '/projects/a',
+    sessionIds: ['a-1', 'a-2'],
+    detachSession: async (sessionId: SessionId) => {
+      workspaceA.sessionIds = workspaceA.sessionIds.filter(id => id !== sessionId)
+    },
+  }
+  const workspaceB = {
+    id: 'b',
+    title: 'B',
+    path: '/projects/b',
+    sessionIds: ['b-1'],
+    detachSession: async () => {},
+  }
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1', 'a-2', 'b-1'],
+    workspaces: [workspaceA, workspaceB],
+  })
+  const service = startService(ctx)
+
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+
+  assert.deepEqual(result, { deleted: true, deletedCount: 2 })
+  // The archived group is gone, but the DSH Workspace registration and its
+  // project directory/path remain; only the archived-session accounting was
+  // detached.
+  const remaining = ctx.workspaceRegistry.list() as FakeWorkspace[]
+  assert.equal(remaining.some(workspace => workspace.id === 'a'), true)
+  assert.equal(remaining.find(workspace => workspace.id === 'a')?.path, '/projects/a')
+  assert.deepEqual(remaining.find(workspace => workspace.id === 'a')?.sessionIds, [])
+  assert.deepEqual(remaining.find(workspace => workspace.id === 'b')?.sessionIds, ['b-1'])
+  assert.deepEqual(state.archivedSessionIds, ['b-1'])
+})
+
 test('deleteWorkspace: aborts the whole group when any session is running', async () => {
   const { ctx, state } = makeWorkspaceContext({
     archivedSessionIds: ['a-1', 'a-2'],

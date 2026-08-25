@@ -85,6 +85,17 @@ test('no prototype injection into the DSH runtime', () => {
   }
 })
 
+test('plugin code has 0 references to workspaceRegistry.delete()', () => {
+  const hits = sources.filter(({ text }) => /ctx\.workspaceRegistry\s*\.\s*delete\s*\(/.test(text))
+  assert.deepEqual(hits.map(hit => hit.path), [])
+})
+
+test('plugin code has no filesystem delete primitives (fs.unlink/rm/rmdir)', () => {
+  const hits = sources.filter(({ text }) =>
+    /fs\.(unlink|rm|rmdir|unlinkSync|rmSync|rmdirSync)\s*\(/.test(text))
+  assert.deepEqual(hits.map(hit => hit.path), [])
+})
+
 test('no direct storage writes (fs write calls) in plugin code', () => {
   for (const { path, text } of sources) {
     if (/fs\.(writeFile|writeFileSync|appendFile|createWriteStream)|\bwriteFileSync\b/.test(text)) {

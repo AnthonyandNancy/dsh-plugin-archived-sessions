@@ -320,8 +320,9 @@ export class ArchivedSessionsService extends TypertRemoteService {
       await this.deleteOne(sessionId)
     } catch (error: unknown) {
       // Second protection: the session may have become running/live after the
-      // check above and before deleteOne inspected it.
-      if (isSessionRunningError(error)) {
+      // check above and before deleteOne inspected it (the coordinator also
+      // rejects the delete with a "while it is live" persistence error).
+      if (isLiveDeleteError(error)) {
         return this.runningError(request.sessionId)
       }
       if (error instanceof SessionNotFoundError) {
@@ -442,7 +443,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
         ctx.logger.warn(
           `archived-sessions: deleteWorkspace stopped after ${deletedCount} deletion(s); failed on "${item.sessionId}": ${String(error)}`,
         )
-        if (isSessionRunningError(error) && deletedCount === 0) {
+        if (isLiveDeleteError(error) && deletedCount === 0) {
           // A running session slipped past the loop re-check but deleteOne's
           // own guard caught it before anything was deleted.
           return {
