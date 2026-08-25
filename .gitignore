@@ -5,3 +5,5 @@ lib/
 .playwright-cli/
 .dsh-vision-tool/
 .dsh-vision-cloud/
+*test-client-out/
+*test-host-out/
