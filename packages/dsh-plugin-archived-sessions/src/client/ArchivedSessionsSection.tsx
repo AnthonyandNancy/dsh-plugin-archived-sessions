@@ -127,6 +127,13 @@ const groupCountStyle: CSSProperties = {
   color: 'var(--dsw-alias-text-secondary)',
 }
 
+const groupActionsStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flexShrink: 0,
+}
+
 export function ArchivedSessionsSection({
   close: _close,
   store,
@@ -134,6 +141,7 @@ export function ArchivedSessionsSection({
 }: ArchivedSessionsSectionProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [deleting, setDeleting] = useState<ArchivedSessionItem | null>(null)
+  const [deletingWorkspace, setDeletingWorkspace] = useState<ArchivedGroup | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -218,6 +226,37 @@ export function ArchivedSessionsSection({
     void runAction(target.sessionId, 'delete', () => store.delete(target.sessionId))
   }
 
+  const handleDeleteWorkspace = (): void => {
+    if (deletingWorkspace === null) return
+    const target = deletingWorkspace
+    const workspaceKey = target.key === '__ungrouped__' ? undefined : target.key
+    setDeletingWorkspace(null)
+    setAcknowledged(false)
+    setBusyId(`workspace:${target.key}`)
+    setActionError(null)
+    void (async () => {
+      try {
+        await store.deleteWorkspace(workspaceKey)
+      } catch (error: unknown) {
+        console.error('archived-sessions: archivedSessions/deleteWorkspace failed', error)
+        const code = (error as { code?: string }).code
+        if (code === 'workspace-sessions-running') {
+          const count = (error as { runningSessionCount?: number }).runningSessionCount
+          setActionError(`${t('deleteWorkspaceRunning')}${count !== undefined ? `（${count}）` : ''}`)
+        } else if (code === 'workspace-delete-partial') {
+          const partial = error as { deletedCount?: number; failedSessionId?: string }
+          setActionError(`${t('deleteWorkspacePartial')}${partial.deletedCount !== undefined ? `（${partial.deletedCount}）` : ''}`)
+        } else if (code === 'workspace-delete-unsupported') {
+          setActionError(t('deleteWorkspaceUnavailable'))
+        } else {
+          setActionError(t('deleteWorkspaceFailed'))
+        }
+      } finally {
+        setBusyId(null)
+      }
+    })()
+  }
+
   return (
     <div style={{ padding: '0 2px' }}>
       <p style={{ margin: '0 0 16px', color: 'var(--dsw-alias-text-secondary)', fontSize: '13px' }}>
@@ -278,8 +317,25 @@ export function ArchivedSessionsSection({
                 <Chevron expanded={expanded} />
                 <span style={groupTitleStyle}>{group.title}</span>
               </span>
-              <span style={groupCountStyle}>
-                {group.items.length} {t('sessionCount')}
+              <span style={groupActionsStyle}>
+                <span style={groupCountStyle}>
+                  {group.items.length} {t('sessionCount')}
+                </span>
+                {!searching && (
+                  <Button
+                    variant="ghost"
+                    style={{ color: 'var(--dsw-alias-state-error-primary)' }}
+                    disabled={busyId === `workspace:${group.key}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setDeleting(null)
+                      setDeletingWorkspace(group)
+                      setAcknowledged(false)
+                    }}
+                  >
+                    {busyId === `workspace:${group.key}` ? t('deletingWorkspace') : t('deleteWorkspace')}
+                  </Button>
+                )}
               </span>
             </button>
             {expanded && (
@@ -344,6 +400,21 @@ export function ArchivedSessionsSection({
           onAcknowledgedChange={setAcknowledged}
           onCancel={() => { setDeleting(null); setAcknowledged(false) }}
           onConfirm={() => { handleDelete() }}
+        />
+      )}
+
+      {deletingWorkspace !== null && (
+        <RiskConfirmation
+          open
+          title={t('deleteWorkspaceTitle')}
+          description={`${t('workspace')}: ${deletingWorkspace.title}\n${deletingWorkspace.items.length} ${t('sessionCount')} · ${t('deleteWorkspaceDescription')}`}
+          acknowledgeLabel={t('deleteWorkspaceAcknowledge')}
+          cancelLabel={t('cancel')}
+          confirmLabel={t('confirmDelete')}
+          acknowledged={acknowledged}
+          onAcknowledgedChange={setAcknowledged}
+          onCancel={() => { setDeletingWorkspace(null); setAcknowledged(false) }}
+          onConfirm={() => { handleDeleteWorkspace() }}
         />
       )}
     </div>

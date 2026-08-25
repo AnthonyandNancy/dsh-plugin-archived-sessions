@@ -32,6 +32,15 @@ export const zh = {
   restoreUnavailable: '当前 DSH 运行时不支持恢复',
   deleteUnavailable: '当前 DSH 运行时不支持永久删除',
   unknownWorkspace: '未知工作区',
+  deleteWorkspace: '删除工作区',
+  deletingWorkspace: '删除中…',
+  deleteWorkspaceTitle: '删除工作区的归档会话',
+  deleteWorkspaceDescription: '将永久删除该工作区下的全部归档会话，工作区本身会保留。此操作不可撤销。',
+  deleteWorkspaceAcknowledge: '我了解该操作会永久删除这些会话及历史记录',
+  deleteWorkspaceRunning: '有归档会话正在运行，已中止删除。请先处理运行中的会话',
+  deleteWorkspacePartial: '部分会话删除失败，已删除',
+  deleteWorkspaceUnavailable: '当前 DSH 运行时不支持永久删除',
+  deleteWorkspaceFailed: '删除工作区归档会话失败',
 }
 
 export const en = {
@@ -64,6 +73,15 @@ export const en = {
   restoreUnavailable: 'Restore is unavailable on this DSH runtime',
   deleteUnavailable: 'Permanent delete is unavailable on this DSH runtime',
   unknownWorkspace: 'Unknown workspace',
+  deleteWorkspace: 'Delete workspace',
+  deletingWorkspace: 'Deleting…',
+  deleteWorkspaceTitle: 'Delete workspace archived sessions',
+  deleteWorkspaceDescription: 'This permanently deletes every archived session in this workspace. The workspace itself is kept. This action cannot be undone.',
+  deleteWorkspaceAcknowledge: 'I understand this will permanently delete these sessions and their history',
+  deleteWorkspaceRunning: 'Some archived sessions are running. Deletion aborted. Handle running sessions first',
+  deleteWorkspacePartial: 'Some sessions failed to delete. Deleted',
+  deleteWorkspaceUnavailable: 'Permanent delete is unavailable on this DSH runtime',
+  deleteWorkspaceFailed: 'Failed to delete workspace archived sessions',
 }
 
 export type ArchivedSessionsKey = keyof typeof zh

@@ -130,3 +130,17 @@ test('built Host and Client Typert artifacts contain all strict endpoints', () =
     }
   }
 })
+
+test('workspace delete is rendered at the group header and hidden during search', () => {
+  assert.match(sectionSource, /deletingWorkspace/)
+  assert.match(sectionSource, /t\('deleteWorkspace'\)/)
+  assert.match(sectionSource, /!searching &&/)
+  assert.match(sectionSource, /store\.deleteWorkspace\(/)
+})
+
+test('workspace delete uses RiskConfirmation and surfaces running/partial errors', () => {
+  assert.match(sectionSource, /deleteWorkspaceTitle/)
+  assert.match(sectionSource, /deleteWorkspaceRunning/)
+  assert.match(sectionSource, /deleteWorkspacePartial/)
+  assert.match(sectionSource, /deleteWorkspaceUnavailable/)
+})
