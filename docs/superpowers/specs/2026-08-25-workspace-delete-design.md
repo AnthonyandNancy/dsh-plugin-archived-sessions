@@ -59,9 +59,25 @@ export interface ArchivedWorkspaceRunningError {
   readonly message: string
 }
 
+export interface ArchivedWorkspaceDeleteUnsupportedError {
+  readonly code: 'workspace-delete-unsupported'
+  readonly workspaceId?: string
+  readonly message: string
+}
+
+export interface ArchivedWorkspaceDeletePartialError {
+  readonly code: 'workspace-delete-partial'
+  readonly workspaceId?: string
+  readonly deletedCount: number
+  readonly failedSessionId: string
+  readonly message: string
+}
+
 export type ArchivedWorkspaceDeleteValue =
   | ArchivedWorkspaceDeleteResult
   | ArchivedWorkspaceRunningError
+  | ArchivedWorkspaceDeleteUnsupportedError
+  | ArchivedWorkspaceDeletePartialError
 ```
 
 ### index.ts 新增 `@Remote('deleteWorkspace')`
