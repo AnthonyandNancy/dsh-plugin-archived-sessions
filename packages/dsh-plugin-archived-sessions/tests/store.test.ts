@@ -59,6 +59,7 @@ function makeRemote(overrides: Partial<ArchivedSessionsRemote> = {}): ArchivedSe
     list: async () => ({ ok: true, value: listResult(0) }),
     restore: async () => ({ ok: true, value: { restored: true } }),
     delete: async () => ({ ok: true, value: { deleted: true } }),
+    deleteWorkspace: async () => ({ ok: true, value: { deleted: true, deletedCount: 0 } }),
     ...overrides,
     listCalls: () => listCalls,
   }
@@ -247,3 +248,53 @@ test('grouping: 100 workspaces are all present without load-more interaction', (
   assert.equal(groups.length, 100)
   assert.equal(new Set(groups.map(group => group.key)).size, 100)
 })
+
+test('deleteWorkspace removes the whole workspace group without reloading', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeWorkspaceItem('a', 'A-2', 2),
+    makeWorkspaceItem('b', 'B-1', 3),
+    makeItem(4),
+  ]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+  await store.deleteWorkspace('a')
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 2)
+  assert.equal(state.items.some(item => item.workspaceId === 'a'), false)
+  assert.equal(remote.listCalls(), 1)
+})
+
+test('deleteWorkspace removes ungrouped sessions when workspaceId is undefined', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeItem(2),
+    makeItem(3),
+  ]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  }))
+  await store.refresh()
+  await store.deleteWorkspace(undefined)
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 1)
+  assert.equal(state.items[0]?.workspaceId, 'a')
+})
+
+test('deleteWorkspace surfaces running abort and keeps the list', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspace: async () => ({
+      ok: true,
+      value: { code: 'workspace-sessions-running', runningSessionCount: 1, message: 'session is running' },
+    }),
+  }))
+  await store.refresh()
+  await assert.rejects(() => store.deleteWorkspace('a'), /session is running/)
+  assert.equal(store.getSnapshot().items.length, 1)
+})
+

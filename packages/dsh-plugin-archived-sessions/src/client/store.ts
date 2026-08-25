@@ -19,6 +19,8 @@ import type {
   ArchivedSessionRestoreRequest,
   ArchivedSessionRestoreValue,
   ArchivedSessionsCapabilities,
+  ArchivedWorkspaceDeleteRequest,
+  ArchivedWorkspaceDeleteValue,
 } from '../types.ts'
 
 export type ArchivedSort = 'lastActivity' | 'createdAt'
@@ -41,6 +43,7 @@ export interface ArchivedSessionsRemote {
   list(): Promise<RemoteResult<ArchivedSessionListResult>>
   restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
   delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
+  deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
 }
 
 const INITIAL_STATE: ArchivedSessionsState = {
@@ -110,6 +113,36 @@ export class ArchivedSessionsStore {
       return
     }
     throw new Error(result.value.message)
+  }
+
+  /**
+   * Permanently delete every archived session in one workspace group, then
+   * remove the whole group from the local list after the Host confirms.
+   * `workspaceId` omitted targets ungrouped sessions (未知工作区).
+   */
+  async deleteWorkspace(workspaceId?: string): Promise<void> {
+    const result = await this.remote.deleteWorkspace(workspaceId === undefined ? {} : { workspaceId })
+    if (!result.ok) throw new Error(result.error.message)
+    if ('deleted' in result.value) {
+      this.removeByWorkspace(workspaceId)
+      return
+    }
+    const error = new Error(result.value.message)
+    Object.assign(error, { code: result.value.code })
+    throw error
+  }
+
+  /** Drop every item that belongs to one workspace group. */
+  removeByWorkspace(workspaceId: string | undefined): void {
+    const items = workspaceId === undefined
+      ? this.state.items.filter(item => item.workspaceId !== undefined)
+      : this.state.items.filter(item => item.workspaceId !== workspaceId)
+    if (items.length === this.state.items.length) return
+    this.state = {
+      ...this.state,
+      items,
+    }
+    this.emit()
   }
 
   /** Idempotently drop one id from the local list. */
