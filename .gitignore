@@ -3,3 +3,5 @@ lib/
 *.tsbuildinfo
 *.tgz
 .playwright-cli/
+.dsh-vision-tool/
+.dsh-vision-cloud/
