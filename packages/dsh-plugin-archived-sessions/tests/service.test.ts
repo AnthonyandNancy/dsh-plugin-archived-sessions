@@ -111,12 +111,13 @@ test('unknown runtime: service still starts and restore answers restore-unsuppor
   assert.equal(result.sessionId, 'B')
 })
 
-test('unknown runtime: delete answers delete-unsupported as a domain result', async () => {
+test('runtime without SessionPersistence.delete: service refuses to start', async () => {
   const { ctx } = makeRc6Context()
   delete ctx.sessionPersistence.delete
-  const service = startService(ctx)
-  const result = await service.delete({ sessionId: 'B' })
-  assert.equal(result.code, 'delete-unsupported')
+  assert.throws(
+    () => startService(ctx),
+    /requires a DSH runtime with SessionPersistence.delete support/,
+  )
 })
 
 test('rc.6 delete: cleanup routes through the adapter primitive and clears the archive set', async () => {
@@ -136,6 +137,19 @@ test('future native runtime: delete cleanup calls the official unarchiveSession'
   assert.deepEqual(result, { deleted: true })
   assert.equal(unarchiveCalls, 1)
   assert.deepEqual(state.archivedSessionIds, ['B'])
+})
+
+test('delete: answers session-not-found when the id is not in the archived set', async () => {
+  const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['s1'] })
+  let deleteCalls = 0
+  ctx.sessionPersistence.delete = async () => { deleteCalls++ }
+  const service = startService(ctx)
+
+  const result = await service.delete({ sessionId: 'not-archived' })
+
+  assert.equal(result.code, 'session-not-found')
+  assert.equal(result.sessionId, 'not-archived')
+  assert.equal(deleteCalls, 0)
 })
 
 test('delete: removes one session, keeps the rest, and detaches it from workspace accounting', async () => {
@@ -330,8 +344,6 @@ test('deleteWorkspace: re-checks running state during the loop and reports parti
     if (sessionId === 'a-2' && deleteCalls > 0) return { status: 'running' }
     return undefined
   }
-  ctx.get = (key: string) =>
-    key === 'agentLoop' ? { disposeAgent: async () => true } : undefined
   ctx.sessionPersistence.delete = async () => {
     deleteCalls++
   }
@@ -367,10 +379,24 @@ test('deleteWorkspace: aborts with workspace-sessions-running if the first sessi
   assert.deepEqual(state.archivedSessionIds, ['a-1'])
 })
 
-test('deleteWorkspace: answers workspace-delete-unsupported when persistence delete is missing', async () => {
-  const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['a-1'] })
-  delete ctx.sessionPersistence.delete
+test('deleteWorkspace: rejects a live session in preflight before deleting anything', async () => {
+  let deleteCalls = 0
+  const { ctx, state } = makeWorkspaceContext({
+    archivedSessionIds: ['a-1', 'a-2', 'a-3'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1', 'a-2', 'a-3'], detachSession: async () => {} },
+    ],
+  })
+  ctx.sessions.get = (sessionId: SessionId) =>
+    sessionId === 'a-2' ? { header: { id: sessionId, createdAt: 1 } } as never : undefined
+  ctx.sessionPersistence.delete = async () => { deleteCalls++ }
   const service = startService(ctx)
+
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
-  assert.equal(result.code, 'workspace-delete-unsupported')
+
+  assert.equal(result.code, 'workspace-sessions-running')
+  assert.equal(result.runningSessionCount, 1)
+  assert.equal(result.sessionId, 'a-2')
+  assert.equal(deleteCalls, 0)
+  assert.deepEqual(state.archivedSessionIds, ['a-1', 'a-2', 'a-3'])
 })

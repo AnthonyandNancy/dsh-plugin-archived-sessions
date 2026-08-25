@@ -112,7 +112,9 @@ export class ArchivedSessionsStore {
       this.removeById(sessionId)
       return
     }
-    throw new Error(result.value.message)
+    const error = new Error(result.value.message)
+    Object.assign(error, result.value)
+    throw error
   }
 
   /**

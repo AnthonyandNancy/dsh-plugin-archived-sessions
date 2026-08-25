@@ -202,13 +202,29 @@ test('delete failure keeps every row in the local list', async () => {
     list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
     delete: async () => ({
       ok: true,
-      value: { code: 'delete-unsupported', sessionId: 'a-1', message: 'permanent delete is unavailable on this DSH runtime' },
+      value: { code: 'session-not-found', sessionId: 'a-1', message: 'not in the archived session set' },
     }),
   }))
   await store.refresh()
 
   const error = await captureRejection(() => store.delete('a-1'))
-  assert.equal((error as { message?: string }).message, 'permanent delete is unavailable on this DSH runtime')
+  assert.equal((error as { message?: string }).message, 'not in the archived session set')
+  assert.equal(store.getSnapshot().items.length, 2)
+})
+
+test('delete failure when the session is running keeps every row in the local list', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('a', 'A-2', 2)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    delete: async () => ({
+      ok: true,
+      value: { code: 'session-running', sessionId: 'a-1', message: 'session is running' },
+    }),
+  }))
+  await store.refresh()
+
+  const error = await captureRejection(() => store.delete('a-1'))
+  assert.equal((error as { code?: string }).code, 'session-running')
   assert.equal(store.getSnapshot().items.length, 2)
 })
 
@@ -408,17 +424,6 @@ test('deleteWorkspace surfaces partial failure metadata and refreshes the list',
   const state = store.getSnapshot()
   assert.equal(state.items.length, 1)
   assert.equal(state.items[0]?.sessionId, 'a-2')
-})
-
-test('deleteWorkspace surfaces workspace-delete-unsupported with code', async () => {
-  const store = new ArchivedSessionsStore(makeRemote({
-    deleteWorkspace: async () => ({
-      ok: true,
-      value: { code: 'workspace-delete-unsupported', message: 'unsupported' },
-    }),
-  }))
-  const error = await captureRejection(() => store.deleteWorkspace('a'))
-  assert.equal((error as { code?: string }).code, 'workspace-delete-unsupported')
 })
 
 test('deleteWorkspace surfaces transport failure', async () => {

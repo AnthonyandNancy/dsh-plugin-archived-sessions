@@ -58,9 +58,19 @@ export interface ArchivedSessionRunningError {
 }
 
 /**
- * Domain result for a runtime without `SessionPersistence.delete`: permanent
- * delete is a supported DSH capability, not a plugin feature, so its absence
- * is reported (and the UI disables the action) instead of failing startup.
+ * Business failure used by delete when the id is no longer in the archived
+ * session set (already restored or already deleted).
+ */
+export interface ArchivedSessionNotFoundError {
+  readonly code: 'session-not-found'
+  readonly sessionId: string
+  readonly message: string
+}
+
+/**
+ * Domain result for a runtime without `SessionPersistence.delete`. The
+ * plugin refuses to start on such a runtime in the target branch, so this
+ * type is retained only for wire-shape compatibility with older clients.
  */
 export interface ArchivedSessionDeleteUnsupportedError {
   readonly code: 'delete-unsupported'
@@ -119,6 +129,7 @@ export type ArchivedWorkspaceDeleteValue =
 export type ArchivedSessionDeleteValue =
   | ArchivedSessionDeleteResult
   | ArchivedSessionRunningError
+  | ArchivedSessionNotFoundError
   | ArchivedSessionDeleteUnsupportedError
 
 export interface ArchivedSessionRestoreRequest {

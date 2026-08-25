@@ -9,10 +9,11 @@
  * `enqueueOperation` / `requireState` / `setState` mutation surface
  * otherwise — so the service starts on every DSH build and degrades to a
  * `restore-unsupported` domain result only where no path exists. Deletion
- * reuses first-party orchestration primitives (`SessionPersistence.delete`,
- * `AgentLoop.disposeAgent`, workspace detach) and routes the archive-set
- * cleanup through the same adapter primitive. The plugin never touches
- * session files directly.
+ * reuses the official first-party orchestration primitive
+ * `SessionPersistence.delete` (never filesystem paths, never
+ * `workspaceRegistry.delete()`) and routes the archive-set cleanup through
+ * the same adapter primitive. The plugin never touches session files
+ * directly.
  *
  * @module dsh-plugin-archived-sessions
  */
@@ -60,14 +61,14 @@ interface ArchivedWorkspaceRegistry {
 
 /**
  * Minimal durable-session-persistence surface used by the archived-sessions
- * host. `delete` is optional because older runtimes may lack the
- * orchestration; when absent, delete capability reports `unsupported` and
- * the plugin keeps running.
+ * host. The target runtime MUST ship `SessionPersistence.delete`; the plugin
+ * refuses to start without it because permanent delete is a DSH Core
+ * capability, not a plugin filesystem feature.
  */
 interface ArchivedSessionPersistence {
   listSnapshots(): Promise<readonly { header: SessionHeader }[]>
   readFrom(sessionId: SessionId, offset: number): Promise<{ events: readonly SessionEvent[] }>
-  delete?(sessionId: SessionId, signal?: AbortSignal): Promise<void>
+  delete(sessionId: SessionId, signal?: AbortSignal): Promise<void>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -107,6 +108,27 @@ class SessionRunningError extends Error {
 
 function isSessionRunningError(error: unknown): error is SessionRunningError {
   return error instanceof SessionRunningError
+}
+
+/** Whether a persistence-layer rejection means the session became live/running. */
+function isLiveDeleteError(error: unknown): boolean {
+  return isSessionRunningError(error) || /while it is live|while it is running/u.test(String(error))
+}
+
+/**
+ * Thrown by {@link ArchivedSessionsService.deleteOne} when the requested id is
+ * no longer present in the archived-session set (a concurrent restore or
+ * deletion already removed it).
+ */
+class SessionNotFoundError extends Error {
+  readonly code = 'session-not-found' as const
+  readonly sessionId: string
+
+  constructor(sessionId: string) {
+    super(`cannot delete session "${sessionId}": not in the archived session set`)
+    this.name = 'SessionNotFoundError'
+    this.sessionId = sessionId
+  }
 }
 
 /** Extract plain text from a user message's content blocks, if representable. */
@@ -192,9 +214,14 @@ export class ArchivedSessionsService extends TypertRemoteService {
   private readonly archiveAdapter: ArchiveCompatibilityAdapter
 
   constructor(ctx: Context) {
-    // No startup capability gate: the adapter detects the runtime shape
-    // (official `unarchiveSession`, rc.6 mutation surface, or neither) and
-    // the service degrades to domain results where a capability is missing.
+    // Permanent delete is a first-party DSH Core capability in the target
+    // runtime. Fail fast instead of shipping a UI whose delete buttons can
+    // never work. Restore keeps its runtime capability detection below.
+    if (typeof ctx.sessionPersistence.delete !== 'function') {
+      throw new Error(
+        'archived-sessions requires a DSH runtime with SessionPersistence.delete support',
+      )
+    }
     super(ctx, 'archivedSessions')
     this.archiveAdapter = new ArchiveCompatibilityAdapter(ctx.workspaceRegistry)
   }
@@ -256,7 +283,9 @@ export class ArchivedSessionsService extends TypertRemoteService {
   private capabilities(): ArchivedSessionsCapabilities {
     return {
       restore: this.archiveAdapter.getRestoreCapability(),
-      delete: typeof this.ctx.sessionPersistence.delete === 'function' ? 'native' : 'unsupported',
+      // The service refuses to construct without SessionPersistence.delete, so
+      // the delete path is always native on every running instance.
+      delete: 'native',
     }
   }
 
@@ -282,68 +311,51 @@ export class ArchivedSessionsService extends TypertRemoteService {
   /** Permanently delete one session and its durable history. */
   @Remote('delete')
   async delete(request: ArchivedSessionDeleteRequest): Promise<ArchivedSessionDeleteValue> {
-    const ctx = this.ctx
     const sessionId = SessionId(request.sessionId)
-
-    if (typeof ctx.sessionPersistence.delete !== 'function') {
-      return {
-        code: 'delete-unsupported',
-        sessionId: request.sessionId,
-        message: 'permanent delete is unavailable on this DSH runtime',
-      }
-    }
-
-    const agent = ctx.agents.get(sessionId)
-    if (agent?.status === 'running') {
+    if (this.ctx.agents.get(sessionId)?.status === 'running'
+      || this.ctx.sessions.get(sessionId) !== undefined) {
       return this.runningError(request.sessionId)
     }
-
     try {
       await this.deleteOne(sessionId)
     } catch (error: unknown) {
-      // Second protection: the session may have become running after the
+      // Second protection: the session may have become running/live after the
       // check above and before deleteOne inspected it.
       if (isSessionRunningError(error)) {
         return this.runningError(request.sessionId)
+      }
+      if (error instanceof SessionNotFoundError) {
+        return {
+          code: 'session-not-found',
+          sessionId: request.sessionId,
+          message: error.message,
+        }
       }
       throw error
     }
     return { deleted: true }
   }
 
-  /** Shared single-session irreversible delete used by delete and deleteWorkspace. */
+  /**
+   * Shared single-session irreversible delete used by delete and deleteWorkspace.
+   *
+   * The order is deliberately: (1) preflight — archived membership + not
+   * running/live; (2) `SessionPersistence.delete`; (3) detach every workspace
+   * accounting slot; (4) remove the archive-set entry. Bookkeeping never
+   * pretends success before the durable delete has committed.
+   */
   private async deleteOne(sessionId: SessionId): Promise<void> {
     const ctx = this.ctx
-    const agent = ctx.agents.get(sessionId)
-    if (agent?.status === 'running') {
-      // Last line of defense for every delete entry point: never dispose or
-      // delete a session whose agent is currently running.
+    if (!ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) {
+      throw new SessionNotFoundError(sessionId as string)
+    }
+    if (ctx.agents.get(sessionId)?.status === 'running' || ctx.sessions.get(sessionId) !== undefined) {
+      // Never dispose a running Agent or force-remove a live Session to make
+      // room for a delete; the user must stop/archive it first.
       throw new SessionRunningError(sessionId as string)
     }
-    const liveSession = ctx.sessions.get(sessionId)
-    if (liveSession !== undefined && agent === undefined) {
-      throw new Error(
-        `archived-sessions: cannot delete live session "${sessionId}" because no live agent handle is available to detach it`,
-      )
-    }
 
-    if (agent !== undefined) {
-      const agentLoop = ctx.get('agentLoop') as
-        | { disposeAgent(id: SessionId): Promise<boolean> }
-        | undefined
-      if (agentLoop === undefined) {
-        throw new Error(
-          `archived-sessions: cannot delete live session "${sessionId}" because the agent loop is not available`,
-        )
-      }
-      await agentLoop.disposeAgent(sessionId)
-    }
-
-    const deleteSession = ctx.sessionPersistence.delete
-    if (deleteSession === undefined) {
-      throw new Error('archived-sessions: sessionPersistence.delete disappeared between capability check and delete')
-    }
-    await deleteSession(sessionId)
+    await ctx.sessionPersistence.delete(sessionId)
 
     for (const workspace of ctx.workspaceRegistry.list()) {
       try {
@@ -365,39 +377,46 @@ export class ArchivedSessionsService extends TypertRemoteService {
     }
   }
 
-  /** Permanently delete every archived session in one workspace group. */
+  /**
+   * Permanently deletes all archived sessions in one archived-session
+   * workspace group.
+   *
+   * Does NOT delete the DSH Workspace registration or project directory.
+   *
+   * workspaceId omitted means the Unknown Workspace / Ungrouped group.
+   */
   @Remote('deleteWorkspace')
   async deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<ArchivedWorkspaceDeleteValue> {
     const ctx = this.ctx
     const workspaceId = request.workspaceId
 
-    if (typeof ctx.sessionPersistence.delete !== 'function') {
-      return {
-        code: 'workspace-delete-unsupported',
-        workspaceId,
-        message: 'permanent delete is unavailable on this DSH runtime',
-      }
-    }
-
     const items = (await this.collectItems()).filter(item =>
       workspaceId === undefined ? item.workspaceId === undefined : item.workspaceId === workspaceId,
     )
-    const running = items.filter(item => item.running)
-    if (running.length > 0) {
-      const firstRunning = running[0]!
+    // Preflight the whole group BEFORE deleting anything: one running/live
+    // session aborts the entire batch with no partial deletion.
+    const blocked = items.filter(item => {
+      const id = SessionId(item.sessionId)
+      return item.running || ctx.agents.get(id)?.status === 'running' || ctx.sessions.get(id) !== undefined
+    })
+    if (blocked.length > 0) {
+      const firstBlocked = blocked[0]!
       return {
         code: 'workspace-sessions-running',
         workspaceId,
-        runningSessionCount: running.length,
-        sessionId: firstRunning.sessionId,
-        title: firstRunning.title,
-        message: `cannot delete workspace group: ${running.length} session(s) are running`,
+        runningSessionCount: blocked.length,
+        sessionId: firstBlocked.sessionId,
+        title: firstBlocked.title,
+        message: `cannot delete workspace group: ${blocked.length} session(s) are running/live`,
       }
     }
 
     let deletedCount = 0
     for (const item of items) {
-      if (ctx.agents.get(SessionId(item.sessionId))?.status === 'running') {
+      const id = SessionId(item.sessionId)
+      // Re-check inside the loop too: a session that was cold during preflight
+      // may have become running/live while earlier sessions were deleting.
+      if (ctx.agents.get(id)?.status === 'running' || ctx.sessions.get(id) !== undefined) {
         if (deletedCount === 0) {
           return {
             code: 'workspace-sessions-running',
@@ -417,7 +436,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
         }
       }
       try {
-        await this.deleteOne(SessionId(item.sessionId))
+        await this.deleteOne(id)
         deletedCount++
       } catch (error: unknown) {
         ctx.logger.warn(

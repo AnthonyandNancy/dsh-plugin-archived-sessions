@@ -408,7 +408,7 @@ export function ArchivedSessionsSection({
         <RiskConfirmation
           open
           title={t('deleteTitle')}
-          description={`${deleting.title}\n${t('workspace')}: ${deleting.workspaceTitle ?? t('unknownWorkspace')}\n${t('deleteDescription')}`}
+          description={`${deleting.title}\n\n${t('deleteDescription')}`}
           acknowledgeLabel={t('deleteAcknowledge')}
           cancelLabel={t('cancel')}
           confirmLabel={t('confirmDelete')}
@@ -424,12 +424,12 @@ export function ArchivedSessionsSection({
           open
           title={t('deleteWorkspaceTitle')}
           description={
-            t('deleteWorkspaceConfirmBody')
-              .replace('{title}', deletingWorkspace.title)
-              .replace('{count}', String(deletingWorkspace.items.length))
-            + (deletingWorkspace.key === '__ungrouped__'
-              ? ''
-              : `\n\n${t('deleteWorkspaceConfirmNote')}`)
+            deletingWorkspace.key === '__ungrouped__'
+              ? t('deleteUnknownWorkspaceConfirmBody')
+                  .replace('{count}', String(deletingWorkspace.items.length))
+              : t('deleteWorkspaceConfirmBody')
+                  .replace('{title}', deletingWorkspace.title)
+                  .replace('{count}', String(deletingWorkspace.items.length))
           }
           acknowledgeLabel={t('deleteWorkspaceAcknowledge')}
           cancelLabel={t('cancel')}
