@@ -33,7 +33,7 @@ interface FakeContext {
   }
   sessions: { get(): undefined }
   agents: { get(sessionId?: SessionId): { status?: 'idle' | 'running' } | undefined }
-  get(): undefined
+  get(key?: string): unknown
   logger: { warn(...args: unknown[]): void }
   reflect: { provide(): void }
 }
@@ -268,6 +268,8 @@ test('deleteWorkspace: re-checks running state during the loop and reports parti
     if (sessionId === 'a-2' && deleteCalls > 0) return { status: 'running' }
     return undefined
   }
+  ctx.get = (key: string) =>
+    key === 'agentLoop' ? { disposeAgent: async () => true } : undefined
   ctx.sessionPersistence.delete = async () => {
     deleteCalls++
   }
