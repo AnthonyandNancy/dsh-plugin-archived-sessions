@@ -111,13 +111,18 @@ test('unknown runtime: service still starts and restore answers restore-unsuppor
   assert.equal(result.sessionId, 'B')
 })
 
-test('runtime without SessionPersistence.delete: service refuses to start', async () => {
+test('runtime without SessionPersistence.delete: service starts, reports delete unsupported, and answers delete-unsupported', async () => {
   const { ctx } = makeRc6Context()
   delete ctx.sessionPersistence.delete
-  assert.throws(
-    () => startService(ctx),
-    /requires a DSH runtime with SessionPersistence.delete support/,
-  )
+  const service = startService(ctx)
+  const list = await service.list()
+  assert.equal(list.capabilities.delete, 'unsupported')
+  const result = await service.delete({ sessionId: 'B' })
+  assert.deepEqual(result, {
+    code: 'delete-unsupported',
+    sessionId: 'B',
+    message: 'permanent delete is unavailable on this DSH runtime',
+  })
 })
 
 test('rc.6 delete: cleanup routes through the adapter primitive and clears the archive set', async () => {
@@ -254,6 +259,15 @@ function makeWorkspaceContext(initial: {
   }
   return { ctx, state }
 }
+
+test('deleteWorkspace on runtime without SessionPersistence.delete: answers workspace-delete-unsupported', async () => {
+  const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['a-1'] })
+  delete ctx.sessionPersistence.delete
+  const service = startService(ctx)
+  const result = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.equal(result.code, 'workspace-delete-unsupported')
+  assert.deepEqual(ctx.workspaceRegistry.archivedSessionIds, ['a-1'])
+})
 
 test('deleteWorkspace: deletes every archived session in the workspace and returns the count', async () => {
   const { ctx, state } = makeWorkspaceContext({

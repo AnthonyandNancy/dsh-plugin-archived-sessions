@@ -8,12 +8,15 @@
  * `WorkspaceRegistry.unarchiveSession` when it exists, the rc.6
  * `enqueueOperation` / `requireState` / `setState` mutation surface
  * otherwise — so the service starts on every DSH build and degrades to a
- * `restore-unsupported` domain result only where no path exists. Deletion
- * reuses the official first-party orchestration primitive
- * `SessionPersistence.delete` (never filesystem paths, never
- * `workspaceRegistry.delete()`) and routes the archive-set cleanup through
- * the same adapter primitive. The plugin never touches session files
- * directly.
+ * `restore-unsupported` domain result only where no path exists. Permanent
+ * delete is similarly capability-gated: deletion reuses the official
+ * first-party orchestration primitive `SessionPersistence.delete` (never
+ * filesystem paths, never `workspaceRegistry.delete()`) when the runtime
+ * ships it; on runtimes without it the capability reports `unsupported`,
+ * the UI disables the delete action, and the Remote answers
+ * `delete-unsupported` instead of failing plugin startup. The archive-set
+ * cleanup routes through the same adapter primitive. The plugin never
+ * touches session files directly.
  *
  * @module dsh-plugin-archived-sessions
  */
@@ -61,14 +64,14 @@ interface ArchivedWorkspaceRegistry {
 
 /**
  * Minimal durable-session-persistence surface used by the archived-sessions
- * host. The target runtime MUST ship `SessionPersistence.delete`; the plugin
- * refuses to start without it because permanent delete is a DSH Core
- * capability, not a plugin filesystem feature.
+ * host. `delete` is optional because older runtimes may lack the
+ * orchestration; when absent, the delete capability reports `unsupported`
+ * and the plugin keeps running with the delete action disabled.
  */
 interface ArchivedSessionPersistence {
   listSnapshots(): Promise<readonly { header: SessionHeader }[]>
   readFrom(sessionId: SessionId, offset: number): Promise<{ events: readonly SessionEvent[] }>
-  delete(sessionId: SessionId, signal?: AbortSignal): Promise<void>
+  delete?(sessionId: SessionId, signal?: AbortSignal): Promise<void>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -214,14 +217,10 @@ export class ArchivedSessionsService extends TypertRemoteService {
   private readonly archiveAdapter: ArchiveCompatibilityAdapter
 
   constructor(ctx: Context) {
-    // Permanent delete is a first-party DSH Core capability in the target
-    // runtime. Fail fast instead of shipping a UI whose delete buttons can
-    // never work. Restore keeps its runtime capability detection below.
-    if (typeof ctx.sessionPersistence.delete !== 'function') {
-      throw new Error(
-        'archived-sessions requires a DSH runtime with SessionPersistence.delete support',
-      )
-    }
+    // No startup capability gate: permanent delete is capability-detected
+    // like restore. On runtimes without `SessionPersistence.delete` the
+    // capability reports `unsupported`, the UI disables delete buttons, and
+    // the Remote answers `delete-unsupported` — never a startup failure.
     super(ctx, 'archivedSessions')
     this.archiveAdapter = new ArchiveCompatibilityAdapter(ctx.workspaceRegistry)
   }
@@ -283,9 +282,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
   private capabilities(): ArchivedSessionsCapabilities {
     return {
       restore: this.archiveAdapter.getRestoreCapability(),
-      // The service refuses to construct without SessionPersistence.delete, so
-      // the delete path is always native on every running instance.
-      delete: 'native',
+      delete: typeof this.ctx.sessionPersistence.delete === 'function' ? 'native' : 'unsupported',
     }
   }
 
@@ -312,6 +309,13 @@ export class ArchivedSessionsService extends TypertRemoteService {
   @Remote('delete')
   async delete(request: ArchivedSessionDeleteRequest): Promise<ArchivedSessionDeleteValue> {
     const sessionId = SessionId(request.sessionId)
+    if (typeof this.ctx.sessionPersistence.delete !== 'function') {
+      return {
+        code: 'delete-unsupported',
+        sessionId: request.sessionId,
+        message: 'permanent delete is unavailable on this DSH runtime',
+      }
+    }
     if (this.ctx.agents.get(sessionId)?.status === 'running'
       || this.ctx.sessions.get(sessionId) !== undefined) {
       return this.runningError(request.sessionId)
@@ -356,7 +360,11 @@ export class ArchivedSessionsService extends TypertRemoteService {
       throw new SessionRunningError(sessionId as string)
     }
 
-    await ctx.sessionPersistence.delete(sessionId)
+    const deleteSession = ctx.sessionPersistence.delete
+    if (deleteSession === undefined) {
+      throw new Error('archived-sessions: sessionPersistence.delete disappeared between capability check and delete')
+    }
+    await deleteSession(sessionId)
 
     for (const workspace of ctx.workspaceRegistry.list()) {
       try {
@@ -390,6 +398,14 @@ export class ArchivedSessionsService extends TypertRemoteService {
   async deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<ArchivedWorkspaceDeleteValue> {
     const ctx = this.ctx
     const workspaceId = request.workspaceId
+
+    if (typeof ctx.sessionPersistence.delete !== 'function') {
+      return {
+        code: 'workspace-delete-unsupported',
+        workspaceId,
+        message: 'permanent delete is unavailable on this DSH runtime',
+      }
+    }
 
     const items = (await this.collectItems()).filter(item =>
       workspaceId === undefined ? item.workspaceId === undefined : item.workspaceId === workspaceId,

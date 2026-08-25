@@ -69,8 +69,9 @@ export interface ArchivedSessionNotFoundError {
 
 /**
  * Domain result for a runtime without `SessionPersistence.delete`. The
- * plugin refuses to start on such a runtime in the target branch, so this
- * type is retained only for wire-shape compatibility with older clients.
+ * capability is reported as `unsupported` in the list and the delete button
+ * is disabled in the UI; if a client still issues the delete Remote, the
+ * Host answers with this domain result instead of failing plugin startup.
  */
 export interface ArchivedSessionDeleteUnsupportedError {
   readonly code: 'delete-unsupported'
