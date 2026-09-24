@@ -1,21 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "lib/types"
+    "composite": true,
+    "rootDir": ".",
+    "outDir": ".vendor-build"
   },
   "include": [
     "src"
-  ],
-  "references": [
-    {
-      "path": "../../vendor/cosmokit"
-    },
-    {
-      "path": "../../vendor/cordis"
-    },
-    {
-      "path": "../dsh-invariants"
-    }
   ]
 }

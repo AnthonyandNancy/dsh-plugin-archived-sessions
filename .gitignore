@@ -5,3 +5,10 @@ lib/
 .playwright-cli/
 .dsh-vision-tool/
 .dsh-vision-cloud/
+
+# 平台协议以"已发布构建"的形式 vendored 在 packages/dsh-typert-protocol（见 VENDOR.md）：
+# 它不是本仓库的编译产物，必须进版本库，否则 clean checkout 无法构建。
+!packages/dsh-typert-protocol/lib/
+!packages/dsh-typert-protocol/lib/**
+# 该项目只借用 tsc -b 的 composite 语义，产物丢在 .vendor-build，不入库。
+packages/dsh-typert-protocol/.vendor-build/
