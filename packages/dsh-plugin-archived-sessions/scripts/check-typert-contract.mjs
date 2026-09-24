@@ -1,7 +1,18 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const REQUIRED_ENDPOINTS = ['list', 'restore', 'delete', 'deleteWorkspace', 'deleteWorkspaceRegistration']
+// Every endpoint the Host advertises must be generated with a 0.1.7
+// `create:` strict codec. The listing is header-only, so `details` is the one
+// endpoint whose codec would leave a whole page of rows unhydrated instead of
+// failing loudly — it belongs in this gate like every other Remote.
+const REQUIRED_ENDPOINTS = [
+  'list',
+  'details',
+  'restore',
+  'delete',
+  'deleteWorkspace',
+  'deleteWorkspaceRegistration',
+]
 const ARTIFACTS = ['lib/typert.host.js', 'lib/typert.remote-client.js']
 
 function verifyArtifact(relativePath) {

@@ -29,7 +29,14 @@ function makeItem(index: number): ArchivedSessionItem {
     createdAt: 1_700_000_000_000 + index,
     lastActivityAt: 1_700_000_000_000 + index,
     running: false,
+    detailsLoaded: true,
   }
+}
+
+/** A header-only row, as the archive listing returns every cold session. */
+function makePendingItem(index: number): ArchivedSessionItem {
+  const item = makeItem(index)
+  return { ...item, title: `会话 session-`, lastActivityAt: item.createdAt, detailsLoaded: false }
 }
 
 function makeWorkspaceItem(workspaceId: string, title: string, order: number): ArchivedSessionItem {
@@ -41,6 +48,7 @@ function makeWorkspaceItem(workspaceId: string, title: string, order: number): A
     createdAt: 1_700_000_000_000 + order,
     lastActivityAt: 1_700_000_000_000 + order,
     running: false,
+    detailsLoaded: true,
   }
 }
 
@@ -66,21 +74,43 @@ async function captureRejection(fn: () => Promise<unknown>): Promise<unknown> {
 
 function makeRemote(overrides: Partial<ArchivedSessionsRemote> = {}): ArchivedSessionsRemote & {
   listCalls: () => number
+  detailsRequests: () => readonly (readonly string[])[]
 } {
   let listCalls = 0
-  const remote: ArchivedSessionsRemote & { listCalls: () => number } = {
+  const detailsRequests: (readonly string[])[] = []
+  const remote: ArchivedSessionsRemote & {
+    listCalls: () => number
+    detailsRequests: () => readonly (readonly string[])[]
+  } = {
     list: async () => ({ ok: true, value: listResult(0) }),
+    details: async request => ({
+      ok: true,
+      value: {
+        items: request.sessionIds.map(sessionId => ({
+          sessionId,
+          title: `详细 ${sessionId}`,
+          lastActivityAt: 1_700_000_500_000,
+          detailsLoaded: true,
+        })),
+      },
+    }),
     restore: async () => ({ ok: true, value: { restored: true } }),
     delete: async () => ({ ok: true, value: { deleted: true } }),
     deleteWorkspace: async () => ({ ok: true, value: { deleted: true, deletedCount: 0 } }),
     deleteWorkspaceRegistration: async () => ({ ok: true, value: { deleted: true } }),
     ...overrides,
     listCalls: () => listCalls,
+    detailsRequests: () => detailsRequests,
   }
   const originalList = remote.list
   remote.list = async (...args) => {
     listCalls++
     return await originalList(...args)
+  }
+  const originalDetails = remote.details
+  remote.details = async (...args) => {
+    detailsRequests.push(args[0].sessionIds)
+    return await originalDetails(...args)
   }
   return remote
 }
@@ -504,3 +534,170 @@ test('deleteWorkspaceRegistration surfaces transport failure', async () => {
   await assert.rejects(() => store.deleteWorkspaceRegistration('a'), /boom/)
 })
 
+/**
+ * The listing is header-only, so a row's title and last activity arrive
+ * through `loadDetails`. These cover the store's contract: ask only for what
+ * is missing, cache what arrived, keep it across listings, and never loop on a
+ * row the host cannot fold.
+ */
+test('loadDetails folds only the requested pending rows and caches the result', async () => {
+  const items = [makePendingItem(0), makePendingItem(1), makePendingItem(2)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.loadDetails(['session-0', 'session-1'])
+
+  assert.deepEqual(remote.detailsRequests(), [['session-0', 'session-1']])
+  const state = store.getSnapshot()
+  assert.equal(state.items[0]?.title, '详细 session-0')
+  assert.equal(state.items[0]?.detailsLoaded, true)
+  // The host folds event times only; the store applies the createdAt floor.
+  assert.equal(state.items[0]?.lastActivityAt, 1_700_000_500_000)
+  assert.equal(state.items[2]?.detailsLoaded, false)
+  assert.equal(state.hydrating, false)
+
+  // Already-folded ids are never asked for twice.
+  await store.loadDetails(['session-0', 'session-1'])
+  assert.deepEqual(remote.detailsRequests(), [['session-0', 'session-1']])
+})
+
+test('loadDetails ignores ids outside the listing and rows the host cannot fold', async () => {
+  const items = [makePendingItem(0), makePendingItem(1)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    details: async request => ({
+      ok: true,
+      value: {
+        items: request.sessionIds.map(sessionId => ({
+          sessionId,
+          title: `会话 session-`,
+          lastActivityAt: 0,
+          detailsLoaded: false,
+        })),
+      },
+    }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.loadDetails(['session-9'])
+  assert.deepEqual(remote.detailsRequests(), [])
+
+  await store.loadDetails(['session-0'])
+  assert.deepEqual(remote.detailsRequests(), [['session-0']])
+  const pending = store.getSnapshot().items[0]
+  assert.equal(pending?.detailsLoaded, false)
+  assert.equal(pending?.title, '会话 session-')
+
+  // An unreadable log is not retried on every render.
+  await store.loadDetails(['session-0'])
+  assert.deepEqual(remote.detailsRequests(), [['session-0']])
+})
+
+test('loadDetails batches at 64 ids and reports progress per batch', async () => {
+  const items = Array.from({ length: 70 }, (_, index) => makePendingItem(index))
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.loadDetails(items.map(item => item.sessionId))
+
+  const requests = remote.detailsRequests()
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.length, 64)
+  assert.equal(requests[1]?.length, 6)
+  assert.equal(store.getSnapshot().items.every(item => item.detailsLoaded), true)
+})
+
+test('a refresh keeps folded titles instead of flashing placeholders back', async () => {
+  const items = [makePendingItem(0), makePendingItem(1)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+  await store.loadDetails(['session-0'])
+
+  await store.refresh()
+
+  const state = store.getSnapshot()
+  assert.equal(state.items[0]?.title, '详细 session-0')
+  assert.equal(state.items[0]?.detailsLoaded, true)
+  assert.equal(state.items[1]?.detailsLoaded, false)
+})
+
+test('a resident row from the listing is never overwritten by a cached fold', async () => {
+  const items = [makePendingItem(0), makeItem(1)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.loadDetails(['session-0', 'session-1'])
+
+  // The host answered session-1 from its resident session; the fold must not
+  // replace a fresher live value with a cached one.
+  assert.deepEqual(remote.detailsRequests(), [['session-0']])
+  assert.equal(store.getSnapshot().items[1]?.title, '会话 1')
+})
+
+test('loadDetails surfaces a transport failure and leaves rows retryable', async () => {
+  const items = [makePendingItem(0)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    details: async () => ({ ok: false, error: { code: 'transport', message: 'boom', details: {} } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.loadDetails(['session-0'])
+
+  let state = store.getSnapshot()
+  assert.equal(state.detailsError, 'boom')
+  assert.equal(state.items[0]?.detailsLoaded, false)
+  assert.equal(state.hydrating, false)
+
+  remote.details = async request => ({
+    ok: true,
+    value: {
+      items: request.sessionIds.map(sessionId => ({
+        sessionId,
+        title: `详细 ${sessionId}`,
+        lastActivityAt: 1_700_000_500_000,
+        detailsLoaded: true,
+      })),
+    },
+  })
+  await store.loadDetails(['session-0'])
+  state = store.getSnapshot()
+  assert.equal(state.detailsError, null)
+  assert.equal(state.items[0]?.title, '详细 session-0')
+})
+
+test('a restored row drops its folded details with the row', async () => {
+  const items = [makePendingItem(0)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+  await store.loadDetails(['session-0'])
+
+  await store.restore('session-0')
+  assert.equal(store.getSnapshot().items.length, 0)
+
+  // Re-archived later: the stale fold must not be reused for the new row.
+  const relisted = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const again = new ArchivedSessionsStore(relisted)
+  await again.refresh()
+  await again.loadDetails(['session-0'])
+  assert.deepEqual(relisted.detailsRequests(), [['session-0']])
+})

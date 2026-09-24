@@ -49,11 +49,14 @@ import { WorkspaceRegistrationDeleter } from './host/workspace-registration.ts'
 import type {
   ArchivedSessionDeleteRequest,
   ArchivedSessionDeleteValue,
+  ArchivedSessionDetail,
   ArchivedSessionItem,
   ArchivedSessionListResult,
   ArchivedSessionRestoreRequest,
   ArchivedSessionRestoreValue,
   ArchivedSessionsCapabilities,
+  ArchivedSessionsDetailsRequest,
+  ArchivedSessionsDetailsResult,
 } from './types.ts'
 import type { ArchivedSessionRunningError } from './types.ts'
 import type {
@@ -152,6 +155,13 @@ declare module '@deepseek-ai/cordis' {
 const FALLBACK_TITLE_MAX_CHARS = 48
 
 /**
+ * How many stored logs one `details` request reads at once. The backend's read
+ * path is per-session I/O plus decode, so a bounded fan-out keeps the host
+ * responsive while a revealed batch still resolves in one round trip.
+ */
+const DETAILS_READ_CONCURRENCY = 8
+
+/**
  * Thrown by {@link ArchivedSessionsService.deleteOne} when a session becomes
  * running between an entry point's capability/preflight check and the actual
  * deletion. Entry points translate this into `session-running` /
@@ -217,6 +227,11 @@ function firstUserText(events: readonly SessionEvent[]): string | undefined {
   return undefined
 }
 
+/** Id-derived placeholder a row shows before (or without) its log being read. */
+function fallbackTitle(sessionId: string): string {
+  return `会话 ${sessionId.slice(0, 8)}`
+}
+
 /** Latest user-pinned or provider-derived title event, or a fallback label. */
 function deriveTitle(events: readonly SessionEvent[], sessionId: string): string {
   for (const event of [...events].reverse()) {
@@ -230,12 +245,25 @@ function deriveTitle(events: readonly SessionEvent[], sessionId: string): string
       ? `${first.slice(0, FALLBACK_TITLE_MAX_CHARS)}…`
       : first
   }
-  return `会话 ${sessionId.slice(0, 8)}`
+  return fallbackTitle(sessionId)
 }
 
 /** Later of creation and the latest human prompt / title event. */
 function sessionUpdatedAt(header: SessionHeader, events: readonly SessionEvent[]): number {
   let last = header.createdAt
+  for (const event of events) {
+    if (event.type === 'user/message' && event.data.source.kind === 'user') {
+      last = Math.max(last, event.time)
+    } else if ((event.type as string) === 'session/title') {
+      last = Math.max(last, event.time)
+    }
+  }
+  return last
+}
+
+/** Latest human prompt / title event time, or `0` when the log carries none. */
+function sessionLastActivity(events: readonly SessionEvent[]): number {
+  let last = 0
   for (const event of events) {
     if (event.type === 'user/message' && event.data.source.kind === 'user') {
       last = Math.max(last, event.time)
@@ -256,25 +284,30 @@ function liveSessionEvents(session: ArchivedLiveSession): readonly SessionEvent[
   return []
 }
 
-/** One archived session's display row. */
+/**
+ * One archived session's display row. `events === undefined` is the
+ * header-only row: no log was read, so the title is the id-derived placeholder
+ * and the last activity falls back to creation time.
+ */
 function item(
   sessionId: string,
   header: SessionHeader,
-  events: readonly SessionEvent[],
+  events: readonly SessionEvent[] | undefined,
   running: boolean,
   workspace: { id: string; title: string; path: string } | undefined,
 ): ArchivedSessionItem {
   return {
     sessionId,
-    title: deriveTitle(events, sessionId),
+    title: events === undefined ? fallbackTitle(sessionId) : deriveTitle(events, sessionId),
     ...(workspace === undefined ? {} : {
       workspaceId: workspace.id,
       workspaceTitle: workspace.title,
       workspacePath: workspace.path,
     }),
     createdAt: header.createdAt,
-    lastActivityAt: sessionUpdatedAt(header, events),
+    lastActivityAt: events === undefined ? header.createdAt : sessionUpdatedAt(header, events),
     running,
+    detailsLoaded: events !== undefined,
   }
 }
 
@@ -345,16 +378,20 @@ export class ArchivedSessionsService extends TypertRemoteService {
    * ships: `readFrom(id, 0)` through rc.8, `open(id, 'read')` plus a read
    * handle from 0.1.5 on. A runtime with neither yields no events; the caller
    * already renders that as a header-only row.
+   *
+   * Both calls go through the service instance, never through a detached
+   * reference: every read surface is a real method that touches `this` (the
+   * shipped JSONL backend's `open()` starts with `this.ensureRootEncoding()`),
+   * so extracting it first would throw into the caller's header-only fallback
+   * and silently strip the title and last-activity of every cold row.
    */
   private async readEvents(sessionId: SessionId): Promise<readonly SessionEvent[]> {
     const persistence = this.ctx.sessionPersistence
-    const readFrom = persistence.readFrom
-    if (typeof readFrom === 'function') {
-      return (await readFrom(sessionId, 0)).events
+    if (typeof persistence.readFrom === 'function') {
+      return (await persistence.readFrom(sessionId, 0)).events
     }
-    const open = persistence.open
-    if (typeof open !== 'function') return []
-    const handle = await open(sessionId, 'read')
+    if (typeof persistence.open !== 'function') return []
+    const handle = await persistence.open(sessionId, 'read')
     try {
       return (await handle.read(0)).events
     } finally {
@@ -362,7 +399,17 @@ export class ArchivedSessionsService extends TypertRemoteService {
     }
   }
 
-  /** Build the unsorted archived-session rows shared by list and deleteWorkspace. */
+  /**
+   * Header-only rows for every archived session, shared by list and
+   * deleteWorkspace.
+   *
+   * No stored log is read here: one cold read costs a full storage scan plus a
+   * whole-log decode per session, so folding every row would make the listing
+   * scale with the archive size (minutes for a thousand archived sessions). A
+   * resident session's events are already in memory, so those rows arrive
+   * complete; every other row is filled in later through {@link details} for
+   * the ids a client actually displays.
+   */
   private async collectItems(): Promise<ArchivedSessionItem[]> {
     const ctx = this.ctx
     const ids = [...ctx.workspaceRegistry.archivedSessionIds]
@@ -375,22 +422,12 @@ export class ArchivedSessionsService extends TypertRemoteService {
       const live = ctx.sessions.get(sessionId)
       const header = live?.header ?? headers.get(sessionId)
       if (header === undefined) continue
-      let resolvedEvents = live === undefined ? [] : liveSessionEvents(live)
-      if (live === undefined) {
-        try {
-          resolvedEvents = await this.readEvents(sessionId)
-        } catch (error) {
-          ctx.logger.warn(
-            `archived-sessions: could not read "${sessionId}" for listing (serving header-only): ${String(error)}`,
-          )
-        }
-      }
       const running = ctx.agents.get(sessionId)?.status === 'running'
       const workspace = workspaces.find(candidate => candidate.sessionIds.includes(sessionId))
       items.push(item(
         sessionId,
         header,
-        resolvedEvents,
+        live === undefined ? undefined : liveSessionEvents(live),
         running,
         workspace === undefined ? undefined : {
           id: workspace.id,
@@ -400,6 +437,56 @@ export class ArchivedSessionsService extends TypertRemoteService {
       ))
     }
     return items
+  }
+
+  /**
+   * One row's events for a details request: a resident session's in-memory
+   * events, otherwise its stored log. An unreadable log yields `undefined` and
+   * is logged — the row keeps its header-only values instead of failing the
+   * whole request.
+   */
+  private async readRowEvents(sessionId: SessionId): Promise<readonly SessionEvent[] | undefined> {
+    const live = this.ctx.sessions.get(sessionId)
+    if (live !== undefined) return liveSessionEvents(live)
+    try {
+      return await this.readEvents(sessionId)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(
+        `archived-sessions: could not read "${sessionId}" for details (serving header-only): ${String(error)}`,
+      )
+      return undefined
+    }
+  }
+
+  /**
+   * Fold `title` / `lastActivityAt` for the requested archived sessions only.
+   *
+   * The client asks for the rows it renders (an expanded group, one revealed
+   * batch, or the whole set while searching), so the listing above stays free
+   * of log reads and a large archive only pays for what is on screen. Ids
+   * outside the archive set are ignored: this Remote is reachable by any
+   * client and hydration reads durable logs.
+   */
+  @Remote('details')
+  async details(request: ArchivedSessionsDetailsRequest): Promise<ArchivedSessionsDetailsResult> {
+    const archived = new Set<string>(this.ctx.workspaceRegistry.archivedSessionIds as readonly string[])
+    const ids = [...new Set(request.sessionIds)].filter(id => archived.has(id))
+    const items: ArchivedSessionDetail[] = new Array<ArchivedSessionDetail>(ids.length)
+    let cursor = 0
+    const hydrate = async (): Promise<void> => {
+      while (cursor < ids.length) {
+        const index = cursor++
+        const id = ids[index]!
+        const events = await this.readRowEvents(SessionId(id))
+        items[index] = events === undefined
+          ? { sessionId: id, title: fallbackTitle(id), lastActivityAt: 0, detailsLoaded: false }
+          : { sessionId: id, title: deriveTitle(events, id), lastActivityAt: sessionLastActivity(events), detailsLoaded: true }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(DETAILS_READ_CONCURRENCY, ids.length) }, () => hydrate()),
+    )
+    return { items }
   }
 
   /** Which runtime paths back restore, permanent delete and registration removal. */
@@ -568,7 +655,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
         workspaceId,
         runningSessionCount: blocked.length,
         sessionId: firstBlocked.sessionId,
-        title: firstBlocked.title,
+        title: await this.rowTitle(firstBlocked.sessionId, firstBlocked.title),
         message: `cannot delete workspace group: ${blocked.length} session(s) are running/live`,
       }
     }
@@ -585,7 +672,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
             workspaceId,
             runningSessionCount: 1,
             sessionId: item.sessionId,
-            title: item.title,
+            title: await this.rowTitle(item.sessionId, item.title),
             message: `cannot delete workspace group: session "${item.sessionId}" became running`,
           }
         }
@@ -612,7 +699,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
             workspaceId,
             runningSessionCount: 1,
             sessionId: item.sessionId,
-            title: item.title,
+            title: await this.rowTitle(item.sessionId, item.title),
             message: `cannot delete workspace group: session "${item.sessionId}" became running`,
           }
         }
@@ -675,6 +762,17 @@ export class ArchivedSessionsService extends TypertRemoteService {
       }
     }
     return { deleted: true, workspaceId }
+  }
+
+  /**
+   * The title a user-facing message should name one row by: the folded title
+   * when the log is readable, the row's own value otherwise. Rows arrive
+   * header-only from {@link collectItems}, and the few rows a refusal names are
+   * worth hydrating so the message does not read like a placeholder.
+   */
+  private async rowTitle(sessionId: string, fallback: string): Promise<string> {
+    const events = await this.readRowEvents(SessionId(sessionId))
+    return events === undefined ? fallback : deriveTitle(events, sessionId)
   }
 
   private runningError(sessionId: string): ArchivedSessionRunningError {

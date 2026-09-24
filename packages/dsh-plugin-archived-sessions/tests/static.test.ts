@@ -262,3 +262,24 @@ test('removing a registration never claims to have deleted sessions', () => {
   // And the group action's label must no longer promise workspace deletion.
   assert.match(registrationCopy, /deleteWorkspace: 'Clear archived sessions'/)
 })
+
+test('the archive listing is header-only and rows are folded on demand', () => {
+  const hostSource = readFileSync(join(SRC_ROOT, 'index.ts'), 'utf8')
+  // The listing must not read stored logs: one cold read is a full storage
+  // scan plus a whole-log decode, so folding every row scales with the archive
+  // size instead of with what the client shows.
+  const collectItems = hostSource.match(/private async collectItems[\s\S]*?\n  \}/)
+  assert.notEqual(collectItems, null)
+  assert.equal(/readEvents|readRowEvents/.test(collectItems![0]), false)
+  // Rows carry the pending marker and the on-demand endpoint stays declared.
+  assert.match(hostSource, /detailsLoaded: events !== undefined/)
+  assert.match(hostSource, /@Remote\('details'\)/)
+  assert.match(hostSource, /DETAILS_READ_CONCURRENCY/)
+  // The client asks for exactly the rows it renders (and every row while the
+  // search — which matches on titles — is active).
+  assert.match(sectionSource, /store\.loadDetails\(requestedDetails\)/)
+  assert.match(sectionSource, /if \(searching\) return state\.items\.map\(item => item\.sessionId\)/)
+  // A pending row shows a loading placeholder, never the id-derived fallback.
+  assert.match(sectionSource, /item\.detailsLoaded/)
+  assert.match(sectionSource, /titleSkeletonStyle/)
+})

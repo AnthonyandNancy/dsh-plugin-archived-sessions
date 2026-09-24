@@ -6,7 +6,12 @@
 /** One archived session row shown in the Settings page. */
 export interface ArchivedSessionItem {
   readonly sessionId: string
-  /** Latest `session/title` event text, or a fallback derived from the first user message. */
+  /**
+   * Latest `session/title` event text, or a fallback derived from the first
+   * user message. Only meaningful while {@link ArchivedSessionItem.detailsLoaded}
+   * is true; until then it is the id-derived placeholder a row shows before its
+   * log has been read.
+   */
   readonly title: string
   /** Stable workspace id when the session still has a workspace accounting slot. */
   readonly workspaceId?: string
@@ -20,6 +25,38 @@ export interface ArchivedSessionItem {
   readonly lastActivityAt: number
   /** Whether an agent is currently running for this session. */
   readonly running: boolean
+  /**
+   * Whether `title` / `lastActivityAt` were folded from the session's log, or
+   * from its resident in-memory session. A header-only row costs no log read,
+   * so the listing can answer immediately for an arbitrary archive size; the
+   * rows a client actually shows are filled in through the `details` Remote.
+   */
+  readonly detailsLoaded: boolean
+}
+
+/**
+ * One row's log-derived fields, answered by the `details` Remote.
+ *
+ * `lastActivityAt` is the latest human/title event time only: the host folding
+ * a cold log has no reason to re-list every stored header just to floor one
+ * value, so the caller applies its own `createdAt` floor (the same rule the
+ * full row uses).
+ */
+export interface ArchivedSessionDetail {
+  readonly sessionId: string
+  readonly title: string
+  /** Latest human prompt / title event time; `0` when the log carries none. */
+  readonly lastActivityAt: number
+  /** Whether the log was read; false keeps the caller's header-only values. */
+  readonly detailsLoaded: boolean
+}
+
+export interface ArchivedSessionsDetailsRequest {
+  readonly sessionIds: readonly string[]
+}
+
+export interface ArchivedSessionsDetailsResult {
+  readonly items: readonly ArchivedSessionDetail[]
 }
 
 export interface ArchivedSessionListRequest {

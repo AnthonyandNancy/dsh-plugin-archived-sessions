@@ -27,6 +27,8 @@ import type {
   ArchivedSessionListResult,
   ArchivedSessionRestoreRequest,
   ArchivedSessionRestoreValue,
+  ArchivedSessionsDetailsRequest,
+  ArchivedSessionsDetailsResult,
   ArchivedWorkspaceDeleteRequest,
   ArchivedWorkspaceDeleteValue,
   ArchivedWorkspaceRegistrationDeleteRequest,
@@ -47,6 +49,7 @@ export const inject = ['slots', 'locale', 'sessions', 'workspaces', 'remote']
 interface MountedArchivedSessionsRemote {
   archivedSessions: {
     list(): Promise<RemoteResult<ArchivedSessionListResult>>
+    details(request: ArchivedSessionsDetailsRequest): Promise<RemoteResult<ArchivedSessionsDetailsResult>>
     restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
     delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
     deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
@@ -76,6 +79,7 @@ const ArchivedSessionsSectionPlugin = {
     const mounted = ctx.remote as unknown as MountedArchivedSessionsRemote
     const store = new ArchivedSessionsStore({
       list: () => mounted.archivedSessions.list(),
+      details: request => mounted.archivedSessions.details(request),
       restore: request => mounted.archivedSessions.restore(request),
       delete: request => mounted.archivedSessions.delete(request),
       deleteWorkspace: request => mounted.archivedSessions.deleteWorkspace(request),

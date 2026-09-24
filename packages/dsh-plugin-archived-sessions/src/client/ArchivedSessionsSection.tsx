@@ -49,6 +49,22 @@ const titleStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
+/** Placeholder bar for a row whose title has not been folded from its log yet. */
+const titleSkeletonStyle: CSSProperties = {
+  display: 'inline-block',
+  width: '140px',
+  height: '12px',
+  verticalAlign: 'middle',
+  borderRadius: '4px',
+  background: 'rgba(127, 127, 127, 0.18)',
+}
+
+const hintStyle: CSSProperties = {
+  margin: '0 0 8px',
+  color: 'var(--dsw-alias-text-secondary)',
+  fontSize: '13px',
+}
+
 const metaStyle: CSSProperties = {
   margin: '2px 0 0',
   fontSize: '12px',
@@ -189,8 +205,40 @@ export function ArchivedSessionsSection({
 
   const groups = useMemo(() => groupByWorkspace(items, t('unknownWorkspace')), [items, t])
 
+  const searching = state.filter.trim().length > 0
+
   const getVisibleCount = (group: ArchivedGroup): number =>
     visibleCounts.get(group.key) ?? SESSION_BATCH_SIZE
+
+  /**
+   * The rows whose titles this store should fold next.
+   *
+   * The listing is header-only, so a row's title and last activity arrive
+   * through `store.loadDetails` for exactly the ids on screen: the visible
+   * rows of every expanded group, and — while searching, because the search
+   * matches on titles — the complete row set, so a match is not missed just
+   * because its group is collapsed. `loadDetails` skips what it already has,
+   * so this is safe to recompute on every render.
+   */
+  const requestedDetails = useMemo(() => {
+    if (searching) return state.items.map(item => item.sessionId)
+    const ids: string[] = []
+    for (const group of groups) {
+      if (!expandedGroups.has(group.key)) continue
+      for (const item of group.items.slice(0, getVisibleCount(group))) ids.push(item.sessionId)
+    }
+    return ids
+  }, [state.items, groups, searching, expandedGroups, visibleCounts])
+
+  useEffect(() => {
+    if (requestedDetails.length === 0) return
+    void store.loadDetails(requestedDetails)
+  }, [store, requestedDetails])
+
+  const pendingTitles = useMemo(
+    () => (searching ? state.items.reduce((count, item) => count + (item.detailsLoaded ? 0 : 1), 0) : 0),
+    [searching, state.items],
+  )
 
   const revealMore = (key: string): void => {
     setVisibleCounts(previous => {
@@ -221,6 +269,16 @@ export function ArchivedSessionsSection({
 
   const handleRestore = (item: ArchivedSessionItem): void => {
     void runAction(item.sessionId, 'restore', () => store.restore(item.sessionId))
+  }
+
+  /**
+   * How a confirmation dialog names one row: its current title, or the pending
+   * label while the title is still being folded from the log — never the
+   * id-derived placeholder, and never a stale snapshot from click time.
+   */
+  const titleOf = (item: ArchivedSessionItem): string => {
+    const current = state.items.find(candidate => candidate.sessionId === item.sessionId) ?? item
+    return current.detailsLoaded ? current.title : t('titleLoading')
   }
 
   const handleDelete = (): void => {
@@ -349,6 +407,18 @@ export function ArchivedSessionsSection({
         </p>
       )}
 
+      {searching && pendingTitles > 0 && (
+        <p style={hintStyle}>
+          {t('hydratingTitles')
+            .replace('{done}', String(state.items.length - pendingTitles))
+            .replace('{count}', String(state.items.length))}
+        </p>
+      )}
+
+      {state.detailsError !== null && pendingTitles > 0 && (
+        <p style={{ ...hintStyle, color: 'var(--dsw-alias-state-error-primary)' }}>{t('detailsFailed')}</p>
+      )}
+
       {state.status === 'loading' && items.length === 0 && (
         <div style={stateStyle}>{t('loading')}</div>
       )}
@@ -363,7 +433,6 @@ export function ArchivedSessionsSection({
       )}
 
       {items.length > 0 && groups.map(group => {
-        const searching = state.filter.trim().length > 0
         const expanded = searching ? true : expandedGroups.has(group.key)
         const visibleCount = getVisibleCount(group)
         const visibleGroupItems = group.items.slice(0, visibleCount)
@@ -432,7 +501,11 @@ export function ArchivedSessionsSection({
                 {visibleGroupItems.map(item => (
                   <div key={item.sessionId} style={rowStyle}>
                     <div style={rowMainStyle}>
-                      <p style={titleStyle}>{item.title}</p>
+                      <p style={titleStyle}>
+                        {item.detailsLoaded
+                          ? item.title
+                          : <span style={titleSkeletonStyle} role="status" aria-label={t('titleLoading')} />}
+                      </p>
                       <p style={metaStyle}>
                         {item.workspaceTitle ?? t('unknownWorkspace')}
                         {item.running ? ` · ${t('running')}` : ''}
@@ -486,7 +559,7 @@ export function ArchivedSessionsSection({
         <RiskConfirmation
           open
           title={t('deleteTitle')}
-          description={`${deleting.title}\n\n${t('deleteDescription')}`}
+          description={`${titleOf(deleting)}\n\n${t('deleteDescription')}`}
           acknowledgeLabel={t('deleteAcknowledge')}
           cancelLabel={t('cancel')}
           closeLabel={t('close')}

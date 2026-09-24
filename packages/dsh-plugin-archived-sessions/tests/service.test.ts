@@ -574,7 +574,7 @@ function makeRc15Context(initial: {
   return { ctx, state }
 }
 
-test('0.1.5 runtime: lists through list() + open() and reports delete unsupported', async () => {
+test('0.1.5 runtime: list() is header-only and details() folds the requested rows', async () => {
   const { ctx } = makeRc15Context({
     archivedSessionIds: ['a-1'],
     workspaces: [
@@ -590,18 +590,25 @@ test('0.1.5 runtime: lists through list() + open() and reports delete unsupporte
 
   assert.equal(result.capabilities.restore, 'rc6-compat')
   assert.equal(result.capabilities.delete, 'unsupported')
-  assert.deepEqual(result.items.map(row => ({
-    sessionId: row.sessionId,
-    title: row.title,
-    workspaceId: row.workspaceId,
-    createdAt: row.createdAt,
-    lastActivityAt: row.lastActivityAt,
-  })), [{
+  assert.deepEqual(result.items, [{
+    sessionId: 'a-1',
+    title: '会话 a-1',
+    workspaceId: 'a',
+    workspaceTitle: 'A',
+    workspacePath: '/a',
+    createdAt: 1_700_000_000_000,
+    lastActivityAt: 1_700_000_000_000,
+    running: false,
+    detailsLoaded: false,
+  }])
+
+  const details = await service.details({ sessionIds: ['a-1'] })
+
+  assert.deepEqual(details.items, [{
     sessionId: 'a-1',
     title: '来自 open 的标题',
-    workspaceId: 'a',
-    createdAt: 1_700_000_000_000,
     lastActivityAt: 1_700_000_000_500,
+    detailsLoaded: true,
   }])
 })
 
@@ -618,14 +625,17 @@ test('0.1.5 runtime: the read handle is closed even when read() rejects, and the
   }
   const service = startService(ctx)
 
-  const result = await service.list()
+  const details = await service.details({ sessionIds: ['a-1'] })
 
   assert.deepEqual(opened, ['a-1'])
   assert.deepEqual(closed, ['a-1'])
-  assert.equal(result.items.length, 1)
-  assert.equal(result.items[0]?.sessionId, 'a-1')
-  // No readable events: the title falls back to the session id prefix.
-  assert.equal(result.items[0]?.title, '会话 a-1')
+  // No readable events: the row keeps its id-derived placeholder and says so.
+  assert.deepEqual(details.items, [{
+    sessionId: 'a-1',
+    title: '会话 a-1',
+    lastActivityAt: 0,
+    detailsLoaded: false,
+  }])
 })
 
 test('runtime exposing neither listing surface: list answers with a named error instead of an empty list', async () => {
@@ -645,6 +655,140 @@ test('runtime exposing neither read surface: rows stay header-only', async () =>
 
   assert.equal(result.items.length, 1)
   assert.equal(result.items[0]?.sessionId, 'a-1')
+})
+
+/**
+ * Persistence fakes whose read surface is a real method that touches `this`.
+ *
+ * The shipped JSONL backend reads through instance methods (`open()` begins
+ * with `this.ensureRootEncoding()`, `list()` with its own tracker/root state),
+ * so a caller that detaches the method from its receiver gets
+ * `TypeError: Cannot read properties of undefined`; the listing then silently
+ * degrades to header-only rows (`会话 <id 前 8 位>`, last activity = createdAt).
+ * Arrow-function fakes cannot see that mistake — these keep the dependency.
+ */
+class ReceiverSensitivePersistence {
+  readonly ids: readonly string[]
+  readonly events: readonly unknown[]
+
+  constructor(ids: readonly string[], events: readonly unknown[]) {
+    this.ids = ids
+    this.events = events
+  }
+
+  /** Stored headers, read through `this` like the real backend's listing. */
+  async list(): Promise<readonly { header: { id: SessionId; createdAt: number } }[]> {
+    return this.ids.map(id => ({ header: { id: id as SessionId, createdAt: 1_700_000_000_000 } }))
+  }
+}
+
+/** 0.1.7+ read surface: `open(id, 'read')` plus a handle. */
+class OpenSurfacePersistence extends ReceiverSensitivePersistence {
+  openCalls = 0
+
+  async open(sessionId: SessionId, _access?: 'read'): Promise<{
+    read(offset?: number): Promise<{ events: readonly unknown[] }>
+    close(): Promise<void>
+  }> {
+    if (!this.ids.includes(sessionId)) throw new Error(`session "${sessionId}" not found`)
+    this.openCalls += 1
+    return {
+      read: async (offset = 0) => ({ events: this.events.slice(offset) }),
+      close: async () => {},
+    }
+  }
+}
+
+/** rc.5–rc.8 read surface: `readFrom(id, 0)`. */
+class ReadFromSurfacePersistence extends ReceiverSensitivePersistence {
+  readFromCalls = 0
+
+  async readFrom(_sessionId: SessionId, offset: number): Promise<{ events: readonly unknown[] }> {
+    this.readFromCalls += 1
+    return { events: this.events.slice(offset) }
+  }
+}
+
+const COLD_ROW_EVENTS = [
+  { type: 'user/message', data: { source: { kind: 'user' }, content: ['先读代码'] }, time: 1_700_000_000_100, seq: 0 },
+  { type: 'session/title', data: { title: '冷会话标题' }, time: 1_700_000_000_500, seq: 1 },
+]
+
+test('listing never reads a stored log: every cold row arrives header-only', async () => {
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1', 'a-2'] })
+  const persistence = new OpenSurfacePersistence(['a-1', 'a-2'], COLD_ROW_EVENTS)
+  ctx.sessionPersistence = persistence
+  const service = startService(ctx)
+
+  const result = await service.list()
+
+  assert.equal(persistence.openCalls, 0)
+  assert.equal(result.items.length, 2)
+  assert.equal(result.items.every(row => row.detailsLoaded === false), true)
+  assert.equal(result.items.every(row => row.title === `会话 ${row.sessionId.slice(0, 8)}`), true)
+  // Header-only last activity is the creation time, so the default sort is stable.
+  assert.equal(result.items.every(row => row.lastActivityAt === row.createdAt), true)
+})
+
+test('0.1.7 runtime: the open() read surface keeps its receiver, so a cold row folds its real title', async () => {
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1'] })
+  const persistence = new OpenSurfacePersistence(['a-1'], COLD_ROW_EVENTS)
+  ctx.sessionPersistence = persistence
+  const service = startService(ctx)
+
+  const details = await service.details({ sessionIds: ['a-1'] })
+
+  assert.equal(persistence.openCalls, 1)
+  assert.deepEqual(details.items, [{
+    sessionId: 'a-1',
+    title: '冷会话标题',
+    // Event times only: the caller applies its own createdAt floor.
+    lastActivityAt: 1_700_000_000_500,
+    detailsLoaded: true,
+  }])
+})
+
+test('rc.5-rc.8 runtime: the readFrom() read surface keeps its receiver too', async () => {
+  const { ctx } = makeRc6Context({ archivedSessionIds: ['a-1'] })
+  const persistence = new ReadFromSurfacePersistence(['a-1'], COLD_ROW_EVENTS)
+  ctx.sessionPersistence = persistence
+  const service = startService(ctx)
+
+  const details = await service.details({ sessionIds: ['a-1', 'a-1'] })
+
+  assert.equal(persistence.readFromCalls, 1)
+  assert.deepEqual(details.items, [{
+    sessionId: 'a-1',
+    title: '冷会话标题',
+    lastActivityAt: 1_700_000_000_500,
+    detailsLoaded: true,
+  }])
+})
+
+test('details hydrates a resident session from memory and ignores unarchived ids', async () => {
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1'] })
+  const persistence = new OpenSurfacePersistence(['a-1'], COLD_ROW_EVENTS)
+  ctx.sessionPersistence = persistence
+  ctx.sessions.get = sessionId => sessionId === 'a-1'
+    ? {
+      header: { id: 'a-1' as SessionId, createdAt: 1_700_000_000_000 },
+      snapshotEvents: () => [
+        { type: 'session/title', data: { title: '活会话标题' }, time: 1_700_000_000_900, seq: 0 },
+      ],
+    }
+    : undefined
+  const service = startService(ctx)
+
+  // 'b-9' is not archived, so hydration must not read it.
+  const details = await service.details({ sessionIds: ['a-1', 'b-9'] })
+
+  assert.equal(persistence.openCalls, 0)
+  assert.deepEqual(details.items, [{
+    sessionId: 'a-1',
+    title: '活会话标题',
+    lastActivityAt: 1_700_000_000_900,
+    detailsLoaded: true,
+  }])
 })
 
 test('live session: events come from snapshotEvents() when the events getter is absent', async () => {

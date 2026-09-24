@@ -4,6 +4,13 @@
  * in memory. Session reveal / per-project expansion is presentation state
  * owned by the UI, not by the store.
  *
+ * The listing itself is header-only: reading every archived session's log
+ * would make the page scale with the archive size, so a row's title and last
+ * activity arrive through `loadDetails` for the ids the UI actually renders.
+ * Hydrated values are cached here and re-applied to later listings, so a
+ * workspace archive event never flashes already-known titles back to
+ * placeholders.
+ *
  * Refresh is split into a full first load (`status: 'loading'`) and quiet
  * background refreshes (`refreshing: true`): once rows are on screen, a
  * workspace archive event re-fetches without flashing the page back into a
@@ -14,11 +21,14 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   ArchivedSessionDeleteRequest,
   ArchivedSessionDeleteValue,
+  ArchivedSessionDetail,
   ArchivedSessionItem,
   ArchivedSessionListResult,
   ArchivedSessionRestoreRequest,
   ArchivedSessionRestoreValue,
   ArchivedSessionsCapabilities,
+  ArchivedSessionsDetailsRequest,
+  ArchivedSessionsDetailsResult,
   ArchivedWorkspaceDeleteRequest,
   ArchivedWorkspaceDeleteValue,
   ArchivedWorkspaceRegistrationDeleteRequest,
@@ -26,6 +36,13 @@ import type {
 } from '../types.ts'
 
 export type ArchivedSort = 'lastActivity' | 'createdAt'
+
+/**
+ * How many rows one `details` Remote call asks for. The host caps its own read
+ * concurrency, so this only trades round trips against progress granularity:
+ * the UI re-renders (and reports progress) once per batch.
+ */
+const DETAILS_BATCH_SIZE = 64
 
 export interface ArchivedSessionsState {
   readonly status: 'loading' | 'ready' | 'error'
@@ -38,11 +55,16 @@ export interface ArchivedSessionsState {
   readonly sort: ArchivedSort
   /** Host-detected runtime paths; gates the restore / delete buttons. */
   readonly capabilities: ArchivedSessionsCapabilities
+  /** True while at least one `details` request is in flight. */
+  readonly hydrating: boolean
+  /** Failure of the last `details` request, kept separate from the list error. */
+  readonly detailsError: string | null
 }
 
 /** Minimal structural Remote face used by the store (avoids a hard import of generated d.ts here). */
 export interface ArchivedSessionsRemote {
   list(): Promise<RemoteResult<ArchivedSessionListResult>>
+  details(request: ArchivedSessionsDetailsRequest): Promise<RemoteResult<ArchivedSessionsDetailsResult>>
   restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
   delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
   deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
@@ -68,6 +90,8 @@ const INITIAL_STATE: ArchivedSessionsState = {
   filter: '',
   sort: 'lastActivity',
   capabilities: { restore: 'unsupported', delete: 'unsupported', workspaceDelete: 'unsupported' },
+  hydrating: false,
+  detailsError: null,
 }
 
 export class ArchivedSessionsStore {
@@ -75,6 +99,12 @@ export class ArchivedSessionsStore {
   private readonly listeners = new Set<() => void>()
   private refreshPromise: Promise<void> | undefined
   private readonly remote: ArchivedSessionsRemote
+  /** Hydrated row values, keyed by session id; survives listings. */
+  private readonly details = new Map<string, ArchivedSessionDetail>()
+  /** Ids with a `details` request in flight, so repeat renders do not re-ask. */
+  private readonly inFlight = new Set<string>()
+  /** Ids whose log this host cannot read; asking again would repeat the failure. */
+  private readonly unreadable = new Set<string>()
 
   constructor(remote: ArchivedSessionsRemote) {
     this.remote = remote
@@ -100,6 +130,48 @@ export class ArchivedSessionsStore {
   refresh(): Promise<void> {
     this.refreshPromise ??= this.doRefresh().finally(() => { this.refreshPromise = undefined })
     return this.refreshPromise
+  }
+
+  /**
+   * Fold `title` / `lastActivityAt` for the rows a caller is about to render.
+   *
+   * Ids already hydrated, already in flight, known unreadable, or absent from
+   * the current listing are skipped, so the UI can call this on every render
+   * with its visible ids. Rows are patched in place and the store emits once
+   * per batch, which keeps scrolling and expanded groups stable.
+   */
+  async loadDetails(sessionIds: readonly string[]): Promise<void> {
+    const loaded = new Set(this.state.items.filter(item => item.detailsLoaded).map(item => item.sessionId))
+    const known = new Set(this.state.items.map(item => item.sessionId))
+    const wanted: string[] = []
+    for (const sessionId of sessionIds) {
+      if (loaded.has(sessionId) || this.details.has(sessionId) || this.inFlight.has(sessionId)) continue
+      if (this.unreadable.has(sessionId) || !known.has(sessionId)) continue
+      this.inFlight.add(sessionId)
+      wanted.push(sessionId)
+    }
+    if (wanted.length === 0) return
+
+    this.state = { ...this.state, hydrating: true, detailsError: null }
+    this.emit()
+    try {
+      for (let offset = 0; offset < wanted.length; offset += DETAILS_BATCH_SIZE) {
+        const batch = wanted.slice(offset, offset + DETAILS_BATCH_SIZE)
+        const result = await this.remote.details({ sessionIds: batch })
+        if (!result.ok) throw new Error(result.error.message)
+        this.applyDetails(result.value.items)
+        this.emit()
+      }
+    } catch (error: unknown) {
+      // Keep whatever arrived; the rows still pending stay placeholders and
+      // keep their ids out of `inFlight` so a later render may retry them.
+      const message = error instanceof Error ? error.message : String(error)
+      this.state = { ...this.state, detailsError: message }
+    } finally {
+      for (const sessionId of wanted) this.inFlight.delete(sessionId)
+      this.state = { ...this.state, hydrating: this.inFlight.size > 0 }
+      this.emit()
+    }
   }
 
   /**
@@ -189,13 +261,14 @@ export class ArchivedSessionsStore {
 
   /** Drop every item that belongs to one workspace group. */
   removeByWorkspace(workspaceId: string | undefined): void {
-    const items = workspaceId === undefined
-      ? this.state.items.filter(item => item.workspaceId !== undefined)
-      : this.state.items.filter(item => item.workspaceId !== workspaceId)
-    if (items.length === this.state.items.length) return
+    const belongs = (item: ArchivedSessionItem): boolean =>
+      workspaceId === undefined ? item.workspaceId === undefined : item.workspaceId === workspaceId
+    const dropped = this.state.items.filter(belongs)
+    if (dropped.length === 0) return
+    for (const item of dropped) this.forgetDetails(item.sessionId)
     this.state = {
       ...this.state,
-      items,
+      items: this.state.items.filter(item => !belongs(item)),
     }
     this.emit()
   }
@@ -204,11 +277,61 @@ export class ArchivedSessionsStore {
   removeById(sessionId: string): void {
     const items = this.state.items.filter(item => item.sessionId !== sessionId)
     if (items.length === this.state.items.length) return
+    this.forgetDetails(sessionId)
     this.state = {
       ...this.state,
       items,
     }
     this.emit()
+  }
+
+  /**
+   * Fold one `details` response into the current rows. Only rows still waiting
+   * are patched: a row the listing already answered (a resident session) is
+   * newer than a cached fold, and `lastActivityAt` keeps the caller's
+   * `createdAt` floor because the host folds event times only.
+   */
+  private applyDetails(details: readonly ArchivedSessionDetail[]): void {
+    if (details.length === 0) return
+    const byId = new Map(details.map(detail => [detail.sessionId, detail]))
+    for (const detail of details) {
+      if (detail.detailsLoaded) this.details.set(detail.sessionId, detail)
+      else this.unreadable.add(detail.sessionId)
+    }
+    const items = this.state.items.map(item => {
+      if (item.detailsLoaded) return item
+      const detail = byId.get(item.sessionId)
+      if (detail === undefined || !detail.detailsLoaded) return item
+      return {
+        ...item,
+        title: detail.title,
+        lastActivityAt: Math.max(detail.lastActivityAt, item.createdAt),
+        detailsLoaded: true,
+      }
+    })
+    this.state = { ...this.state, items }
+  }
+
+  /** Re-apply hydrated values to a freshly listed row set. */
+  private withCachedDetails(items: readonly ArchivedSessionItem[]): readonly ArchivedSessionItem[] {
+    if (this.details.size === 0) return items
+    return items.map(item => {
+      if (item.detailsLoaded) return item
+      const detail = this.details.get(item.sessionId)
+      if (detail === undefined) return item
+      return {
+        ...item,
+        title: detail.title,
+        lastActivityAt: Math.max(detail.lastActivityAt, item.createdAt),
+        detailsLoaded: true,
+      }
+    })
+  }
+
+  /** Drop cached hydration for one id (restored or deleted rows). */
+  private forgetDetails(sessionId: string): void {
+    this.details.delete(sessionId)
+    this.unreadable.delete(sessionId)
   }
 
   private async doRefresh(): Promise<void> {
@@ -230,7 +353,9 @@ export class ArchivedSessionsStore {
         ...this.state,
         status: 'ready',
         refreshing: false,
-        items: result.value.items,
+        // A re-listing is header-only again; keep the titles this store has
+        // already hydrated instead of flashing them back to placeholders.
+        items: this.withCachedDetails(result.value.items),
         capabilities: result.value.capabilities,
         error: null,
       }
