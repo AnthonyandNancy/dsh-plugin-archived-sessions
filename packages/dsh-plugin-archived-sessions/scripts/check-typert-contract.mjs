@@ -25,6 +25,19 @@ function verifyArtifact(relativePath) {
     if (!descriptor.includes("mode: 'strict'")) {
       throw new Error(`${relativePath} has no strict codec for ${endpoint}`)
     }
+
+    // 0.1.7 replaced the `schema:` codec contribution with a `create:` factory
+    // (`TypertRemoteContribution.create`). A `schema:` artifact is accepted by the
+    // generator but rejected at run time by dsh-typert-loader, which then withdraws
+    // every strict definition in the same fiber -- including the built-in
+    // directoryPicker/agentPresets/pluginInventory remotes. Both directions are
+    // checked so that a stale artifact can never be published again.
+    if (!descriptor.includes('create:')) {
+      throw new Error(`${relativePath} has no create() codec factory for ${endpoint} (0.1.7 requires create:, not schema:)`)
+    }
+    if (/(^|[\s{,])schema:\s/.test(descriptor)) {
+      throw new Error(`${relativePath} still uses the removed schema: codec contribution for ${endpoint}`)
+    }
   }
 }
 

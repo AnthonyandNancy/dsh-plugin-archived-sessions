@@ -64,14 +64,42 @@ interface ArchivedWorkspaceRegistry {
 
 /**
  * Minimal durable-session-persistence surface used by the archived-sessions
- * host. `delete` is optional because older runtimes may lack the
- * orchestration; when absent, the delete capability reports `unsupported`
- * and the plugin keeps running with the delete action disabled.
+ * host. Every member is optional because the storage contract was reshaped
+ * between DSH builds and the plugin probes the runtime instead of comparing
+ * version strings:
+ *
+ *   - `listSnapshots()` (rc.5–rc.8) and `list()` (0.1.5+) both yield stored
+ *     session headers; listing needs one of them.
+ *   - `readFrom(id, 0)` (rc.5–rc.8) and `open(id, 'read')` + a read handle
+ *     (0.1.5+) both read one session's event log; a runtime with neither still
+ *     lists header-only rows.
+ *   - `delete` is optional because older runtimes may lack the orchestration;
+ *     when absent, the delete capability reports `unsupported` and the plugin
+ *     keeps running with the delete action disabled.
  */
 interface ArchivedSessionPersistence {
-  listSnapshots(): Promise<readonly { header: SessionHeader }[]>
-  readFrom(sessionId: SessionId, offset: number): Promise<{ events: readonly SessionEvent[] }>
+  listSnapshots?(): Promise<readonly { header: SessionHeader }[]>
+  list?(): Promise<readonly { header: SessionHeader }[]>
+  readFrom?(sessionId: SessionId, offset: number): Promise<{ events: readonly SessionEvent[] }>
+  open?(sessionId: SessionId, access: 'read'): Promise<ArchivedSessionHandle>
   delete?(sessionId: SessionId, signal?: AbortSignal): Promise<void>
+}
+
+/** Minimal read-handle surface of the 0.1.5+ `SessionPersistence.open` contract. */
+interface ArchivedSessionHandle {
+  read(offset?: number): Promise<{ events: readonly SessionEvent[] }>
+  close(): Promise<void>
+}
+
+/**
+ * Minimal live-session shape. The `events` getter (rc.5–rc.8) became
+ * `snapshotEvents()` in 0.1.5+; either accessor may be absent, so both are
+ * runtime probes and a session with neither contributes no events.
+ */
+interface ArchivedLiveSession {
+  header: SessionHeader
+  events?: readonly SessionEvent[]
+  snapshotEvents?(): readonly SessionEvent[]
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -83,7 +111,7 @@ declare module '@deepseek-ai/cordis' {
       get(sessionId: SessionId): { status: 'idle' | 'running' } | undefined
     }
     sessions: {
-      get(sessionId: SessionId): { header: SessionHeader; events: readonly SessionEvent[] } | undefined
+      get(sessionId: SessionId): ArchivedLiveSession | undefined
     }
   }
 }
@@ -186,6 +214,16 @@ function sessionUpdatedAt(header: SessionHeader, events: readonly SessionEvent[]
   return last
 }
 
+/**
+ * A live session's events through whichever accessor this runtime ships: the
+ * `events` getter through rc.8, `snapshotEvents()` from 0.1.5 on.
+ */
+function liveSessionEvents(session: ArchivedLiveSession): readonly SessionEvent[] {
+  if (Array.isArray(session.events)) return session.events
+  if (typeof session.snapshotEvents === 'function') return session.snapshotEvents()
+  return []
+}
+
 /** One archived session's display row. */
 function item(
   sessionId: string,
@@ -233,15 +271,56 @@ export class ArchivedSessionsService extends TypertRemoteService {
     return { items, capabilities: this.capabilities() }
   }
 
+  /**
+   * Stored-session headers by id, from whichever listing surface this runtime
+   * ships: `listSnapshots()` through rc.8, `list()` (whose snapshots carry the
+   * same `header`) from 0.1.5 on. Headers are the listing's hard dependency —
+   * a runtime exposing neither cannot render a single row, so that case is a
+   * named error instead of a silently empty list.
+   */
+  private async readHeaders(): Promise<ReadonlyMap<string, SessionHeader>> {
+    const persistence = this.ctx.sessionPersistence
+    const snapshots = typeof persistence.listSnapshots === 'function'
+      ? await persistence.listSnapshots()
+      : typeof persistence.list === 'function'
+        ? await persistence.list()
+        : undefined
+    if (snapshots === undefined) {
+      throw new Error(
+        'archived-sessions: this DSH runtime exposes neither SessionPersistence.listSnapshots nor SessionPersistence.list',
+      )
+    }
+    return new Map(snapshots.map(snapshot => [snapshot.header.id, snapshot.header]))
+  }
+
+  /**
+   * One stored session's event log through whichever read surface this runtime
+   * ships: `readFrom(id, 0)` through rc.8, `open(id, 'read')` plus a read
+   * handle from 0.1.5 on. A runtime with neither yields no events; the caller
+   * already renders that as a header-only row.
+   */
+  private async readEvents(sessionId: SessionId): Promise<readonly SessionEvent[]> {
+    const persistence = this.ctx.sessionPersistence
+    const readFrom = persistence.readFrom
+    if (typeof readFrom === 'function') {
+      return (await readFrom(sessionId, 0)).events
+    }
+    const open = persistence.open
+    if (typeof open !== 'function') return []
+    const handle = await open(sessionId, 'read')
+    try {
+      return (await handle.read(0)).events
+    } finally {
+      await handle.close()
+    }
+  }
+
   /** Build the unsorted archived-session rows shared by list and deleteWorkspace. */
   private async collectItems(): Promise<ArchivedSessionItem[]> {
     const ctx = this.ctx
     const ids = [...ctx.workspaceRegistry.archivedSessionIds]
 
-    const snapshots = await ctx.sessionPersistence.listSnapshots()
-    const headers = new Map<string, SessionHeader>(
-      snapshots.map(snapshot => [snapshot.header.id, snapshot.header]),
-    )
+    const headers = await this.readHeaders()
     const workspaces = ctx.workspaceRegistry.list()
 
     const items: ArchivedSessionItem[] = []
@@ -249,12 +328,10 @@ export class ArchivedSessionsService extends TypertRemoteService {
       const live = ctx.sessions.get(sessionId)
       const header = live?.header ?? headers.get(sessionId)
       if (header === undefined) continue
-      const events = live?.events ?? []
-      let resolvedEvents = events
+      let resolvedEvents = live === undefined ? [] : liveSessionEvents(live)
       if (live === undefined) {
         try {
-          const inspection = await ctx.sessionPersistence.readFrom(sessionId, 0)
-          resolvedEvents = inspection.events
+          resolvedEvents = await this.readEvents(sessionId)
         } catch (error) {
           ctx.logger.warn(
             `archived-sessions: could not read "${sessionId}" for listing (serving header-only): ${String(error)}`,

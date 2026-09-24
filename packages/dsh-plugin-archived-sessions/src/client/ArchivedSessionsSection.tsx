@@ -411,6 +411,7 @@ export function ArchivedSessionsSection({
           description={`${deleting.title}\n\n${t('deleteDescription')}`}
           acknowledgeLabel={t('deleteAcknowledge')}
           cancelLabel={t('cancel')}
+          closeLabel={t('close')}
           confirmLabel={t('confirmDelete')}
           acknowledged={acknowledged}
           onAcknowledgedChange={setAcknowledged}
@@ -433,6 +434,7 @@ export function ArchivedSessionsSection({
           }
           acknowledgeLabel={t('deleteWorkspaceAcknowledge')}
           cancelLabel={t('cancel')}
+          closeLabel={t('close')}
           confirmLabel={t('confirmDelete')}
           acknowledged={acknowledged}
           onAcknowledgedChange={setAcknowledged}

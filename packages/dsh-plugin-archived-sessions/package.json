@@ -45,10 +45,12 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
     }
@@ -69,25 +71,21 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-web-react": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-workspace": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-gateway": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-workspace": "^0.1.7-rc.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-client-ui-conversation": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

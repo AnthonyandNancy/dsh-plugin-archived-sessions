@@ -21,17 +21,31 @@ interface FakeState {
   archivedSessionIds: string[]
 }
 
+interface FakeLiveSession {
+  header: { id: SessionId; createdAt: number }
+  events?: readonly unknown[]
+  snapshotEvents?(): readonly unknown[]
+}
+
+/** Storage surfaces of one DSH build; the service probes whichever exist. */
+interface FakeSessionPersistence {
+  listSnapshots?(): Promise<readonly { header: { id: SessionId; createdAt: number } }[]>
+  list?(): Promise<readonly { header: { id: SessionId; createdAt: number } }[]>
+  readFrom?(): Promise<{ events: readonly unknown[] }>
+  open?(sessionId: SessionId, access: 'read'): Promise<{
+    read(offset?: number): Promise<{ events: readonly unknown[] }>
+    close(): Promise<void>
+  }>
+  delete?: (sessionId: SessionId) => Promise<void>
+}
+
 interface FakeContext {
   workspaceRegistry: Record<string, unknown> & {
     readonly archivedSessionIds: readonly SessionId[]
     list(): unknown[]
   }
-  sessionPersistence: {
-    listSnapshots(): Promise<readonly { header: { id: SessionId; createdAt: number } }[]>
-    readFrom(): Promise<{ events: readonly unknown[] }>
-    delete?: (sessionId: SessionId) => Promise<void>
-  }
-  sessions: { get(): undefined }
+  sessionPersistence: FakeSessionPersistence
+  sessions: { get(sessionId?: SessionId): FakeLiveSession | undefined }
   agents: { get(sessionId?: SessionId): { status?: 'idle' | 'running' } | undefined }
   get(key?: string): unknown
   logger: { warn(...args: unknown[]): void }
@@ -450,4 +464,171 @@ test('deleteWorkspace: rejects a live session in preflight before deleting anyth
   assert.equal(result.sessionId, 'a-2')
   assert.equal(deleteCalls, 0)
   assert.deepEqual(state.archivedSessionIds, ['a-1', 'a-2', 'a-3'])
+})
+
+/**
+ * 0.1.5-shaped context: `SessionPersistence` lost `listSnapshots`,
+ * `readFrom`, and `delete`; headers come from `list()` (snapshots carrying
+ * `header`) and one session's log from `open(id, 'read')` plus a read handle.
+ * The registry mutation surface is unchanged, so restore stays `rc6-compat`.
+ */
+function makeRc15Context(initial: {
+  archivedSessionIds?: string[]
+  workspaces?: FakeWorkspace[]
+  headers?: readonly { id: SessionId; createdAt: number }[]
+  events?: readonly unknown[]
+  onOpen?: (sessionId: SessionId) => void
+  onClose?: (sessionId: SessionId) => void
+} = {}) {
+  const state: FakeState = {
+    workspaceIds: [],
+    archivedSessionIds: [...(initial.archivedSessionIds ?? [])],
+  }
+  const ctx: FakeContext = {
+    workspaceRegistry: {
+      get archivedSessionIds() {
+        return state.archivedSessionIds
+      },
+      list: () => initial.workspaces ?? [],
+      async enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+        return await operation()
+      },
+      requireState: () => state,
+      async setState(next: unknown): Promise<void> {
+        Object.assign(state, next as Partial<FakeState>)
+      },
+    },
+    sessionPersistence: {
+      list: async () =>
+        (initial.headers ?? (initial.archivedSessionIds ?? []).map(id => ({
+          id: id as SessionId,
+          createdAt: 1_700_000_000_000,
+        }))).map(header => ({ header })),
+      open: async (sessionId: SessionId) => {
+        initial.onOpen?.(sessionId)
+        return {
+          read: async () => ({ events: initial.events ?? [] }),
+          close: async () => { initial.onClose?.(sessionId) },
+        }
+      },
+    },
+    sessions: { get: () => undefined },
+    agents: { get: () => undefined },
+    get: () => undefined,
+    logger: { warn: () => {} },
+    reflect: { provide: () => {} },
+  }
+  return { ctx, state }
+}
+
+test('0.1.5 runtime: lists through list() + open() and reports delete unsupported', async () => {
+  const { ctx } = makeRc15Context({
+    archivedSessionIds: ['a-1'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1'], detachSession: async () => {} },
+    ],
+    events: [
+      { type: 'session/title', data: { title: '来自 open 的标题' }, time: 1_700_000_000_500, seq: 0 },
+    ],
+  })
+  const service = startService(ctx)
+
+  const result = await service.list()
+
+  assert.equal(result.capabilities.restore, 'rc6-compat')
+  assert.equal(result.capabilities.delete, 'unsupported')
+  assert.deepEqual(result.items.map(row => ({
+    sessionId: row.sessionId,
+    title: row.title,
+    workspaceId: row.workspaceId,
+    createdAt: row.createdAt,
+    lastActivityAt: row.lastActivityAt,
+  })), [{
+    sessionId: 'a-1',
+    title: '来自 open 的标题',
+    workspaceId: 'a',
+    createdAt: 1_700_000_000_000,
+    lastActivityAt: 1_700_000_000_500,
+  }])
+})
+
+test('0.1.5 runtime: the read handle is closed even when read() rejects, and the row degrades to header-only', async () => {
+  const opened: string[] = []
+  const closed: string[] = []
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1'], onOpen: id => opened.push(id), onClose: id => closed.push(id) })
+  ctx.sessionPersistence.open = async (sessionId: SessionId) => {
+    opened.push(sessionId)
+    return {
+      read: async () => { throw new Error('torn tail') },
+      close: async () => { closed.push(sessionId) },
+    }
+  }
+  const service = startService(ctx)
+
+  const result = await service.list()
+
+  assert.deepEqual(opened, ['a-1'])
+  assert.deepEqual(closed, ['a-1'])
+  assert.equal(result.items.length, 1)
+  assert.equal(result.items[0]?.sessionId, 'a-1')
+  // No readable events: the title falls back to the session id prefix.
+  assert.equal(result.items[0]?.title, '会话 a-1')
+})
+
+test('runtime exposing neither listing surface: list answers with a named error instead of an empty list', async () => {
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1'] })
+  delete ctx.sessionPersistence.list
+  const service = startService(ctx)
+
+  await assert.rejects(service.list(), /exposes neither SessionPersistence\.listSnapshots nor SessionPersistence\.list/)
+})
+
+test('runtime exposing neither read surface: rows stay header-only', async () => {
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1'] })
+  delete ctx.sessionPersistence.open
+  const service = startService(ctx)
+
+  const result = await service.list()
+
+  assert.equal(result.items.length, 1)
+  assert.equal(result.items[0]?.sessionId, 'a-1')
+})
+
+test('live session: events come from snapshotEvents() when the events getter is absent', async () => {
+  const { ctx } = makeRc15Context({ archivedSessionIds: ['a-1'] })
+  ctx.sessions.get = sessionId => sessionId === 'a-1'
+    ? {
+      header: { id: 'a-1' as SessionId, createdAt: 1_700_000_000_000 },
+      snapshotEvents: () => [
+        { type: 'session/title', data: { title: '活会话标题' }, time: 1_700_000_000_700, seq: 0 },
+      ],
+    }
+    : undefined
+  const service = startService(ctx)
+
+  const result = await service.list()
+
+  assert.equal(result.items[0]?.title, '活会话标题')
+  assert.equal(result.items[0]?.lastActivityAt, 1_700_000_000_700)
+})
+
+test('live session: the legacy events getter still wins when the runtime ships it', async () => {
+  const { ctx } = makeRc6Context({ archivedSessionIds: ['a-1'] })
+  ctx.sessions.get = sessionId => sessionId === 'a-1'
+    ? {
+      header: { id: 'a-1' as SessionId, createdAt: 1_700_000_000_000 },
+      events: [
+        { type: 'session/title', data: { title: '旧 getter 标题' }, time: 1_700_000_000_800, seq: 0 },
+      ],
+      snapshotEvents: () => [
+        { type: 'session/title', data: { title: '不该被用到' }, time: 1_700_000_000_900, seq: 0 },
+      ],
+    }
+    : undefined
+  const service = startService(ctx)
+
+  const result = await service.list()
+
+  assert.equal(result.items[0]?.title, '旧 getter 标题')
+  assert.equal(result.items[0]?.lastActivityAt, 1_700_000_000_800)
 })
