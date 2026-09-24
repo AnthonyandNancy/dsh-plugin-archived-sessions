@@ -10,8 +10,8 @@
     "clean": "node scripts/clean.mjs"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-typert-generator": "file:../deepseek-harness-desktop/upstream/deepseek-harness/packages/typert/generator",
-    "@deepseek-ai/dsh-typert-protocol": "file:../deepseek-harness-desktop/upstream/deepseek-harness/packages/typert/protocol",
+    "@deepseek-ai/dsh-typert-generator": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.7-rc.1",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
@@ -20,5 +20,9 @@
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3"
   },
-  "pnpm": {}
+  "pnpm": {
+    "overrides": {
+      "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    }
+  }
 }

@@ -16,7 +16,11 @@ import type {
   ArchivedSessionsCapabilities,
 } from '../src/types.ts'
 
-const CAPABILITIES: ArchivedSessionsCapabilities = { restore: 'rc6-compat', delete: 'native' }
+const CAPABILITIES: ArchivedSessionsCapabilities = {
+  restore: 'rc6-compat',
+  delete: 'native',
+  workspaceDelete: 'native',
+}
 
 function makeItem(index: number): ArchivedSessionItem {
   return {
@@ -51,6 +55,15 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
   return { promise, resolve, reject }
 }
 
+async function captureRejection(fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await fn()
+  } catch (error) {
+    return error
+  }
+  assert.fail('expected promise to reject')
+}
+
 function makeRemote(overrides: Partial<ArchivedSessionsRemote> = {}): ArchivedSessionsRemote & {
   listCalls: () => number
 } {
@@ -59,6 +72,8 @@ function makeRemote(overrides: Partial<ArchivedSessionsRemote> = {}): ArchivedSe
     list: async () => ({ ok: true, value: listResult(0) }),
     restore: async () => ({ ok: true, value: { restored: true } }),
     delete: async () => ({ ok: true, value: { deleted: true } }),
+    deleteWorkspace: async () => ({ ok: true, value: { deleted: true, deletedCount: 0 } }),
+    deleteWorkspaceRegistration: async () => ({ ok: true, value: { deleted: true } }),
     ...overrides,
     listCalls: () => listCalls,
   }
@@ -76,7 +91,11 @@ test('initial state: full loading, not refreshing, capabilities unknown until fi
   assert.equal(state.status, 'loading')
   assert.equal(state.refreshing, false)
   assert.deepEqual(state.items, [])
-  assert.deepEqual(state.capabilities, { restore: 'unsupported', delete: 'unsupported' })
+  assert.deepEqual(state.capabilities, {
+    restore: 'unsupported',
+    delete: 'unsupported',
+    workspaceDelete: 'unsupported',
+  })
 })
 
 test('first load keeps the full fetched list and surfaces host capabilities', async () => {
@@ -147,6 +166,95 @@ test('restore surfaces restore-unsupported as a normal error and keeps the row',
   await store.refresh()
   await assert.rejects(() => store.restore('session-3'), /restore is unavailable/)
   assert.equal(store.getSnapshot().items.length, 10)
+})
+
+test('delete removes only the deleted row after the Host confirms', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeWorkspaceItem('a', 'A-2', 2),
+    makeWorkspaceItem('b', 'B-1', 3),
+  ]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  await store.delete('a-1')
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 2)
+  assert.equal(state.items.some(item => item.sessionId === 'a-1'), false)
+  assert.equal(remote.listCalls(), 1)
+})
+
+test('delete is pessimistic: the row stays visible until the Host resolves success', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('a', 'A-2', 2)]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+
+  const gate = deferred<{ ok: true; value: { deleted: true } }>()
+  remote.delete = () => gate.promise
+  const pending = store.delete('a-1')
+  assert.equal(store.getSnapshot().items.length, 2)
+
+  gate.resolve({ ok: true, value: { deleted: true } })
+  await pending
+  assert.equal(store.getSnapshot().items.length, 1)
+})
+
+test('delete failure keeps every row in the local list', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('a', 'A-2', 2)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    delete: async () => ({
+      ok: true,
+      value: { code: 'session-not-found', sessionId: 'a-1', message: 'not in the archived session set' },
+    }),
+  }))
+  await store.refresh()
+
+  const error = await captureRejection(() => store.delete('a-1'))
+  assert.equal((error as { message?: string }).message, 'not in the archived session set')
+  assert.equal(store.getSnapshot().items.length, 2)
+})
+
+test('delete failure when the session is running keeps every row in the local list', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('a', 'A-2', 2)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    delete: async () => ({
+      ok: true,
+      value: { code: 'session-running', sessionId: 'a-1', message: 'session is running' },
+    }),
+  }))
+  await store.refresh()
+
+  const error = await captureRejection(() => store.delete('a-1'))
+  assert.equal((error as { code?: string }).code, 'session-running')
+  assert.equal(store.getSnapshot().items.length, 2)
+})
+
+test('deleteWorkspace(undefined) sends an empty object, not a wildcard', async () => {
+  let capturedRequest: unknown
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeItem(2),
+    makeItem(3),
+  ]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspace: async request => {
+      capturedRequest = request
+      return { ok: true, value: { deleted: true, deletedCount: 2 } }
+    },
+  }))
+  await store.refresh()
+  await store.deleteWorkspace(undefined)
+  assert.deepEqual(capturedRequest, {})
+  assert.equal(store.getSnapshot().items.length, 1)
 })
 
 test('background refresh failure keeps current rows visible and records the error', async () => {
@@ -247,3 +355,152 @@ test('grouping: 100 workspaces are all present without load-more interaction', (
   assert.equal(groups.length, 100)
   assert.equal(new Set(groups.map(group => group.key)).size, 100)
 })
+
+test('deleteWorkspace removes the whole workspace group without reloading', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeWorkspaceItem('a', 'A-2', 2),
+    makeWorkspaceItem('b', 'B-1', 3),
+    makeItem(4),
+  ]
+  const remote = makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+  await store.deleteWorkspace('a')
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 2)
+  assert.equal(state.items.some(item => item.workspaceId === 'a'), false)
+  assert.equal(remote.listCalls(), 1)
+})
+
+test('deleteWorkspace removes ungrouped sessions when workspaceId is undefined', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeItem(2),
+    makeItem(3),
+  ]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+  }))
+  await store.refresh()
+  await store.deleteWorkspace(undefined)
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 1)
+  assert.equal(state.items[0]?.workspaceId, 'a')
+})
+
+test('deleteWorkspace surfaces running abort with code and count and keeps the list', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspace: async () => ({
+      ok: true,
+      value: { code: 'workspace-sessions-running', runningSessionCount: 1, message: 'session is running' },
+    }),
+  }))
+  await store.refresh()
+  const error = await captureRejection(() => store.deleteWorkspace('a'))
+  assert.equal((error as { code?: string }).code, 'workspace-sessions-running')
+  assert.equal((error as { runningSessionCount?: number }).runningSessionCount, 1)
+  assert.equal(store.getSnapshot().items.length, 1)
+})
+
+test('deleteWorkspace surfaces partial failure metadata and refreshes the list', async () => {
+  const items = [
+    makeWorkspaceItem('a', 'A-1', 1),
+    makeWorkspaceItem('a', 'A-2', 2),
+  ]
+  const remote = makeRemote({
+    list: async () => {
+      if (remote.listCalls() === 1) {
+        return { ok: true, value: { items, capabilities: CAPABILITIES } }
+      }
+      return { ok: true, value: { items: [items[1]!], capabilities: CAPABILITIES } }
+    },
+    deleteWorkspace: async () => ({
+      ok: true,
+      value: { code: 'workspace-delete-partial', deletedCount: 1, failedSessionId: 'A-1', message: 'partial' },
+    }),
+  })
+  const store = new ArchivedSessionsStore(remote)
+  await store.refresh()
+  const error = await captureRejection(() => store.deleteWorkspace('a'))
+  assert.equal((error as { code?: string }).code, 'workspace-delete-partial')
+  assert.equal((error as { deletedCount?: number }).deletedCount, 1)
+  assert.equal(remote.listCalls(), 2) // initial refresh + fresh reconciliation refresh
+  const state = store.getSnapshot()
+  assert.equal(state.items.length, 1)
+  assert.equal(state.items[0]?.sessionId, 'a-2')
+})
+
+test('deleteWorkspace surfaces transport failure', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspace: async () => ({
+      ok: false,
+      error: { code: 'transport', message: 'boom', details: {} },
+    }),
+  }))
+  await assert.rejects(() => store.deleteWorkspace('a'), /boom/)
+})
+
+test('deleteWorkspaceRegistration reports a successful removal without touching the local rows', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('b', 'B-1', 2)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspaceRegistration: async () => ({ ok: true, value: { deleted: true } }),
+  }))
+  await store.refresh()
+
+  const outcome = await store.deleteWorkspaceRegistration('a')
+
+  assert.equal(outcome, 'deleted')
+  // The sessions are still archived; only the next list decides they belong
+  // under the unknown-workspace group, so nothing is dropped locally here.
+  assert.equal(store.getSnapshot().items.length, 2)
+})
+
+test('deleteWorkspaceRegistration treats an unknown id as a non-error outcome', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspaceRegistration: async () => ({
+      ok: true,
+      value: { code: 'workspace-not-found', workspaceId: 'ghost', message: 'no such workspace' },
+    }),
+  }))
+
+  const outcome = await store.deleteWorkspaceRegistration('ghost')
+
+  assert.equal(outcome, 'not-found')
+})
+
+test('deleteWorkspaceRegistration surfaces an unsupported runtime as a coded error', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspaceRegistration: async () => ({
+      ok: true,
+      value: {
+        code: 'workspace-registration-delete-unsupported',
+        workspaceId: 'a',
+        message: 'unavailable',
+      },
+    }),
+  }))
+
+  const error = await captureRejection(() => store.deleteWorkspaceRegistration('a'))
+
+  assert.equal(
+    (error as { code?: string }).code,
+    'workspace-registration-delete-unsupported',
+  )
+})
+
+test('deleteWorkspaceRegistration surfaces transport failure', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspaceRegistration: async () => ({
+      ok: false,
+      error: { code: 'transport', message: 'boom', details: {} },
+    }),
+  }))
+  await assert.rejects(() => store.deleteWorkspaceRegistration('a'), /boom/)
+})
+

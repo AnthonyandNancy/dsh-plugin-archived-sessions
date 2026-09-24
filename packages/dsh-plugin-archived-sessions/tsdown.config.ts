@@ -1,28 +1,32 @@
 import { defineConfig } from 'tsdown'
 import { typertPlugin } from '@deepseek-ai/dsh-typert-generator/tsdown'
 
-/** Module specifiers the DSH web shell shares into the frozen module table. */
+/**
+ * Module specifiers the 0.1.7 web shell freezes into its shared module table.
+ *
+ * The shell bundle (`@deepseek-ai/dsh-web-frontend`) registers `@deepseek-ai/cordis`,
+ * `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-dockkit`,
+ * `@deepseek-ai/dsh-client-ui-primitives` and `@deepseek-ai/dsh-client-ui-slots`
+ * (plus the React family); every other package a Client half needs is loaded as its
+ * own `dsh.client` module and reached either through the plugin's own `dsh.client`
+ * `inject` list or through an `external` entry of the package that owns it. The
+ * retired `dsh-client-runtime` / `dsh-client-web-react` are gone from 0.1.7: client
+ * plugins now type against the Cordis `Context` and pull the client services in
+ * through the packages that own them.
+ */
 const PLATFORM_MODULES = [
   'react',
   'react/jsx-runtime',
   'react-dom',
   'react-dom/client',
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-web-react',
+  '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-ui-dockkit',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-ui-attachment',
-  '@deepseek-ai/dsh-client-schema-form',
+  '@deepseek-ai/dsh-client-ui-slots',
 ]
 
-/** Additional runtime services this plugin collaborates with through cordis. */
-const RUNTIME_EXTERNALS = [
-  '@deepseek-ai/dsh-client-runtime',
-  '@deepseek-ai/dsh-client-locale',
-  '@deepseek-ai/dsh-client-ui-conversation',
-]
-
-const CLIENT_EXTERNALS = [...PLATFORM_MODULES, ...RUNTIME_EXTERNALS]
+const CLIENT_EXTERNALS = [...PLATFORM_MODULES]
 
 export default defineConfig(({ env }) => {
   const client = env?.DSH_BUILD_FACE === 'client'

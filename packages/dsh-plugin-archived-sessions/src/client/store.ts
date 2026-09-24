@@ -19,6 +19,10 @@ import type {
   ArchivedSessionRestoreRequest,
   ArchivedSessionRestoreValue,
   ArchivedSessionsCapabilities,
+  ArchivedWorkspaceDeleteRequest,
+  ArchivedWorkspaceDeleteValue,
+  ArchivedWorkspaceRegistrationDeleteRequest,
+  ArchivedWorkspaceRegistrationDeleteValue,
 } from '../types.ts'
 
 export type ArchivedSort = 'lastActivity' | 'createdAt'
@@ -41,7 +45,20 @@ export interface ArchivedSessionsRemote {
   list(): Promise<RemoteResult<ArchivedSessionListResult>>
   restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
   delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
+  deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
+  deleteWorkspaceRegistration(
+    request: ArchivedWorkspaceRegistrationDeleteRequest,
+  ): Promise<RemoteResult<ArchivedWorkspaceRegistrationDeleteValue>>
 }
+
+/**
+ * Outcome of a Workspace-registration removal.
+ *
+ * `not-found` is not an error — the registry treats an unknown id as an
+ * idempotent no-op, so the requested end state already holds. The caller
+ * still has to distinguish it to avoid claiming a removal it did not perform.
+ */
+export type WorkspaceRegistrationOutcome = 'deleted' | 'not-found'
 
 const INITIAL_STATE: ArchivedSessionsState = {
   status: 'loading',
@@ -50,7 +67,7 @@ const INITIAL_STATE: ArchivedSessionsState = {
   error: null,
   filter: '',
   sort: 'lastActivity',
-  capabilities: { restore: 'unsupported', delete: 'unsupported' },
+  capabilities: { restore: 'unsupported', delete: 'unsupported', workspaceDelete: 'unsupported' },
 }
 
 export class ArchivedSessionsStore {
@@ -109,7 +126,78 @@ export class ArchivedSessionsStore {
       this.removeById(sessionId)
       return
     }
-    throw new Error(result.value.message)
+    const error = new Error(result.value.message)
+    Object.assign(error, result.value)
+    throw error
+  }
+
+  /**
+   * Permanently delete every archived session in one workspace group, then
+   * remove the whole group from the local list after the Host confirms.
+   * `workspaceId` omitted targets ungrouped sessions (未知工作区).
+   */
+  async deleteWorkspace(workspaceId?: string): Promise<void> {
+    const result = await this.remote.deleteWorkspace(workspaceId === undefined ? {} : { workspaceId })
+    if (!result.ok) throw new Error(result.error.message)
+    if ('deleted' in result.value) {
+      this.removeByWorkspace(workspaceId)
+      return
+    }
+    const error = new Error(result.value.message)
+    Object.assign(error, result.value)
+    if (result.value.code === 'workspace-delete-partial') {
+      // A concurrent workspace-archive refresh may already be in flight and
+      // could have been issued before these deletions committed. Wait for it,
+      // then run a fresh refresh so the local list converges.
+      if (this.refreshPromise !== undefined) {
+        try {
+          await this.refreshPromise
+        } catch {
+          // Ignore the earlier refresh's failure; the fresh one below is what
+          // reconciles this deletion result.
+        }
+      }
+      try {
+        await this.refresh()
+      } catch {
+        // Keep the original partial-delete error; refresh failure must not mask it.
+      }
+    }
+    throw error
+  }
+
+  /**
+   * Remove one DSH Workspace registration from the workspace list. The
+   * directory, its files and every session log are retained; the archived rows
+   * stay in this list and simply fall back to the unknown-workspace group once
+   * their `workspaceId` no longer resolves.
+   *
+   * No local removal happens on the rows, deliberately: after the registration
+   * is gone the same sessions are still archived, so dropping them locally
+   * would show a state the next refresh contradicts. Only the next `list()`
+   * decides where they belong.
+   */
+  async deleteWorkspaceRegistration(workspaceId: string): Promise<WorkspaceRegistrationOutcome> {
+    const result = await this.remote.deleteWorkspaceRegistration({ workspaceId })
+    if (!result.ok) throw new Error(result.error.message)
+    if ('deleted' in result.value) return 'deleted'
+    const error = new Error(result.value.message)
+    Object.assign(error, result.value)
+    if (result.value.code === 'workspace-not-found') return 'not-found'
+    throw error
+  }
+
+  /** Drop every item that belongs to one workspace group. */
+  removeByWorkspace(workspaceId: string | undefined): void {
+    const items = workspaceId === undefined
+      ? this.state.items.filter(item => item.workspaceId !== undefined)
+      : this.state.items.filter(item => item.workspaceId !== workspaceId)
+    if (items.length === this.state.items.length) return
+    this.state = {
+      ...this.state,
+      items,
+    }
+    this.emit()
   }
 
   /** Idempotently drop one id from the local list. */

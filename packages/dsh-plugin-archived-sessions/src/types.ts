@@ -31,10 +31,20 @@ export interface ArchivedSessionListRequest {
  * and shipped with every list so the client can gate the UI without a second
  * round trip. `restore` also reaches the client through the restore Remote's
  * domain result; this is the advisory channel that keeps buttons disabled.
+ *
+ * `delete` reports `native` when the Host can actually remove a session's
+ * durable log. DSH ships no session-deletion API in any released version —
+ * the persistence seam is create/open/stat/list/flush — so on the shipped
+ * JSONL backend this means the backend exposed a way to locate the artifact
+ * (`listArtifacts` / `locate`) and the Host removes the log files itself.
+ * `unsupported` only appears on a runtime that exposes neither, and keeps the
+ * delete actions disabled rather than failing at click time.
  */
 export interface ArchivedSessionsCapabilities {
   readonly restore: 'native' | 'rc6-compat' | 'unsupported'
   readonly delete: 'native' | 'unsupported'
+  /** Whether `deleteWorkspaceRegistration` can remove a Workspace registration. */
+  readonly workspaceDelete: 'native' | 'unsupported'
 }
 
 export interface ArchivedSessionListResult {
@@ -58,9 +68,20 @@ export interface ArchivedSessionRunningError {
 }
 
 /**
- * Domain result for a runtime without `SessionPersistence.delete`: permanent
- * delete is a supported DSH capability, not a plugin feature, so its absence
- * is reported (and the UI disables the action) instead of failing startup.
+ * Business failure used by delete when the id is no longer in the archived
+ * session set (already restored or already deleted).
+ */
+export interface ArchivedSessionNotFoundError {
+  readonly code: 'session-not-found'
+  readonly sessionId: string
+  readonly message: string
+}
+
+/**
+ * Domain result for a runtime without `SessionPersistence.delete`. The
+ * capability is reported as `unsupported` in the list and the delete button
+ * is disabled in the UI; if a client still issues the delete Remote, the
+ * Host answers with this domain result instead of failing plugin startup.
  */
 export interface ArchivedSessionDeleteUnsupportedError {
   readonly code: 'delete-unsupported'
@@ -68,9 +89,109 @@ export interface ArchivedSessionDeleteUnsupportedError {
   readonly message: string
 }
 
+/**
+ * One workspace group's bulk delete request.
+ *
+ * workspaceId omitted means the ungrouped / unknown-workspace
+ * archived-session group.
+ */
+export interface ArchivedWorkspaceDeleteRequest {
+  readonly workspaceId?: string
+}
+
+export interface ArchivedWorkspaceDeleteResult {
+  readonly deleted: true
+  readonly deletedCount: number
+}
+
+/** Business failure used by workspace delete when any session in the group is running. */
+export interface ArchivedWorkspaceRunningError {
+  readonly code: 'workspace-sessions-running'
+  readonly workspaceId?: string | undefined
+  readonly runningSessionCount: number
+  /** Id of the first running session found by the preflight (when known). */
+  readonly sessionId?: string
+  /** Display title of the first running session found by the preflight (when known). */
+  readonly title?: string
+  readonly message: string
+}
+
+export interface ArchivedWorkspaceDeleteUnsupportedError {
+  readonly code: 'workspace-delete-unsupported'
+  readonly workspaceId?: string | undefined
+  readonly message: string
+}
+
+/** Non-running delete failure after some sessions were already irreversibly deleted. */
+export interface ArchivedWorkspaceDeletePartialError {
+  readonly code: 'workspace-delete-partial'
+  readonly workspaceId?: string | undefined
+  readonly deletedCount: number
+  readonly failedSessionId: string
+  readonly message: string
+}
+
+export type ArchivedWorkspaceDeleteValue =
+  | ArchivedWorkspaceDeleteResult
+  | ArchivedWorkspaceRunningError
+  | ArchivedWorkspaceDeleteUnsupportedError
+  | ArchivedWorkspaceDeletePartialError
+
+/**
+ * Request to remove a DSH Workspace registration from the workspace list.
+ *
+ * This is deliberately separate from {@link ArchivedWorkspaceDeleteRequest}:
+ * that one permanently deletes the archived *sessions* of one group and keeps
+ * the registration, while this one removes the *registration* and keeps every
+ * directory, file and session log — the official
+ * `WorkspaceRegistry.delete()` semantics, which the sessions of that workspace
+ * survive as Ungrouped.
+ *
+ * `workspaceId` is optional only so the wire type can express the ungrouped
+ * group, which has no registration: the Host refuses that case with
+ * `workspace-not-found` rather than inventing one.
+ */
+export interface ArchivedWorkspaceRegistrationDeleteRequest {
+  readonly workspaceId?: string | undefined
+}
+
+export interface ArchivedWorkspaceRegistrationDeleteResult {
+  readonly deleted: true
+  readonly workspaceId: string
+}
+
+/**
+ * Domain result for an id the registry no longer knows. The registry treats
+ * this as an idempotent no-op, so it is reported as a value rather than an
+ * error: the requested end state (no such registration) already holds.
+ */
+export interface ArchivedWorkspaceRegistrationNotFoundError {
+  readonly code: 'workspace-not-found'
+  readonly workspaceId?: string | undefined
+  readonly message: string
+}
+
+/**
+ * Domain result for a runtime whose registry exposes no `delete`. The
+ * capability is reported as `unsupported` in the list and the action is
+ * disabled in the UI; a client that still calls the Remote gets this value
+ * instead of a transport failure.
+ */
+export interface ArchivedWorkspaceRegistrationDeleteUnsupportedError {
+  readonly code: 'workspace-registration-delete-unsupported'
+  readonly workspaceId?: string | undefined
+  readonly message: string
+}
+
+export type ArchivedWorkspaceRegistrationDeleteValue =
+  | ArchivedWorkspaceRegistrationDeleteResult
+  | ArchivedWorkspaceRegistrationNotFoundError
+  | ArchivedWorkspaceRegistrationDeleteUnsupportedError
+
 export type ArchivedSessionDeleteValue =
   | ArchivedSessionDeleteResult
   | ArchivedSessionRunningError
+  | ArchivedSessionNotFoundError
   | ArchivedSessionDeleteUnsupportedError
 
 export interface ArchivedSessionRestoreRequest {

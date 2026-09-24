@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-archived-sessions",
-  "version": "0.1.0",
-  "description": "DSH web plugin: archived sessions manager (归档会话) with list/search/sort/detail, restore, and permanent delete.",
+  "version": "0.2.0",
+  "description": "DSH web plugin: archived sessions manager (归档会话) with list/search/sort/detail, restore, permanent delete, and workspace registration removal.",
   "type": "module",
   "repository": {
     "type": "git",
@@ -45,10 +45,12 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
     }
@@ -69,25 +71,21 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-client-web-react": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-workspace": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-gateway": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-workspace": "^0.1.7-rc.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-client-ui-conversation": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -107,8 +105,8 @@
     "build:host": "tsc -b tsconfig.build.host.json && tsdown --env.DSH_BUILD_FACE host",
     "build:client": "tsc -b tsconfig.build.client.json && tsdown --env.DSH_BUILD_FACE client",
     "check:typert": "node scripts/check-typert-contract.mjs",
-    "typecheck": "tsc --noEmit",
-    "test": "tsc -b tsconfig.build.host.json && node --test tests/restore-adapter.test.ts tests/service.test.ts tests/store.test.ts tests/static.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.build.host.json && tsc --noEmit -p tsconfig.build.client.json",
+    "test": "tsc -b tsconfig.build.host.json && node --test tests/restore-adapter.test.ts tests/service.test.ts tests/session-log-delete.test.ts tests/store.test.ts tests/static.test.ts",
     "prepack": "npm run build",
     "pack": "npm pack"
   }

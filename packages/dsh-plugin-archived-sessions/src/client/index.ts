@@ -7,8 +7,14 @@
  */
 
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+// 0.1.7 Client plugins type against the Cordis Context itself; the client services
+// are merged in by the packages that own them, so each one is pulled in by a
+// type-only side-effect import below.
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-gateway/client'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import remote from 'dsh-plugin-archived-sessions/remote'
 import { ArchivedSessionsSection } from './ArchivedSessionsSection.tsx'
@@ -21,6 +27,10 @@ import type {
   ArchivedSessionListResult,
   ArchivedSessionRestoreRequest,
   ArchivedSessionRestoreValue,
+  ArchivedWorkspaceDeleteRequest,
+  ArchivedWorkspaceDeleteValue,
+  ArchivedWorkspaceRegistrationDeleteRequest,
+  ArchivedWorkspaceRegistrationDeleteValue,
 } from '../types.ts'
 
 export { ArchivedSessionsStore } from './store.ts'
@@ -39,6 +49,10 @@ interface MountedArchivedSessionsRemote {
     list(): Promise<RemoteResult<ArchivedSessionListResult>>
     restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
     delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
+    deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
+    deleteWorkspaceRegistration(
+      request: ArchivedWorkspaceRegistrationDeleteRequest,
+    ): Promise<RemoteResult<ArchivedWorkspaceRegistrationDeleteValue>>
   }
 }
 
@@ -64,6 +78,8 @@ const ArchivedSessionsSectionPlugin = {
       list: () => mounted.archivedSessions.list(),
       restore: request => mounted.archivedSessions.restore(request),
       delete: request => mounted.archivedSessions.delete(request),
+      deleteWorkspace: request => mounted.archivedSessions.deleteWorkspace(request),
+      deleteWorkspaceRegistration: request => mounted.archivedSessions.deleteWorkspaceRegistration(request),
     })
 
     // Realtime sync: the workspace runtime already folds
