@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-archived-sessions",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH web plugin: archived sessions manager (归档会话) with list/search/sort/detail, restore, and permanent delete.",
   "type": "module",
   "repository": {
