@@ -10,11 +10,22 @@
  * Run `tsc -b tsconfig.build.host.json` (part of `npm test`) first.
  */
 
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { ArchivedSessionsService } from '../lib/types/index.js'
+import {
+  cleanupSessionLogs,
+  FIXTURE_CWD,
+  fixtureHeader,
+  fixtureLogPath,
+  fixtureRoot,
+  writeSessionLog,
+} from './session-log-fixture.ts'
+
+after(() => { cleanupSessionLogs() })
 
 interface FakeState {
   readonly workspaceIds: string[]
@@ -22,13 +33,14 @@ interface FakeState {
 }
 
 interface FakeLiveSession {
-  header: { id: SessionId; createdAt: number }
+  header: { id: SessionId; createdAt: number; cwd?: string }
   events?: readonly unknown[]
   snapshotEvents?(): readonly unknown[]
 }
 
 /** Storage surfaces of one DSH build; the service probes whichever exist. */
 interface FakeSessionPersistence {
+  root?: string
   listSnapshots?(): Promise<readonly { header: { id: SessionId; createdAt: number } }[]>
   list?(): Promise<readonly { header: { id: SessionId; createdAt: number } }[]>
   readFrom?(): Promise<{ events: readonly unknown[] }>
@@ -36,7 +48,10 @@ interface FakeSessionPersistence {
     read(offset?: number): Promise<{ events: readonly unknown[] }>
     close(): Promise<void>
   }>
-  delete?: (sessionId: SessionId) => Promise<void>
+  listArtifacts?(signal?: AbortSignal): Promise<
+    readonly { readonly header: { id: SessionId; createdAt: number; cwd?: string }; readonly path: string }[]
+  >
+  locate?(header: { id: SessionId; cwd?: string }): { readonly path: string } | undefined
 }
 
 interface FakeContext {
@@ -73,9 +88,17 @@ function makeRc6Context(initial: { sessionIds?: string[]; archivedSessionIds?: s
       },
     },
     sessionPersistence: {
-      listSnapshots: async () => [],
+      root: fixtureRoot(),
+      listSnapshots: async () =>
+        (initial.archivedSessionIds ?? []).map(id => ({
+          header: { id: id as SessionId, createdAt: 1_700_000_000_000, cwd: FIXTURE_CWD },
+        })),
       readFrom: async () => ({ events: [] }),
-      delete: async () => {},
+      listArtifacts: async () =>
+        (initial.archivedSessionIds ?? []).map(id => ({
+          header: fixtureHeader(id),
+          path: fixtureLogPath(id),
+        })),
     },
     sessions: { get: () => undefined },
     agents: { get: () => undefined },
@@ -96,7 +119,9 @@ test('rc.6 runtime: service starts, lists, and reports rc6-compat restore capabi
   const result = await service.list()
   assert.equal(result.capabilities.restore, 'rc6-compat')
   assert.equal(result.capabilities.delete, 'native')
-  assert.deepEqual(result.items, [])
+  assert.deepEqual(result.items.map(row => ({ sessionId: row.sessionId, title: row.title })), [
+    { sessionId: 'B', title: '会话 B' },
+  ])
 })
 
 test('rc.6 restore: removes the id from the archive set and returns restored:true', async () => {
@@ -125,9 +150,9 @@ test('unknown runtime: service still starts and restore answers restore-unsuppor
   assert.equal(result.sessionId, 'B')
 })
 
-test('runtime without SessionPersistence.delete: service starts, reports delete unsupported, and answers delete-unsupported', async () => {
+test('runtime without an artifact surface: service starts, reports delete unsupported, and answers delete-unsupported', async () => {
   const { ctx } = makeRc6Context()
-  delete ctx.sessionPersistence.delete
+  delete ctx.sessionPersistence.listArtifacts
   const service = startService(ctx)
   const list = await service.list()
   assert.equal(list.capabilities.delete, 'unsupported')
@@ -140,6 +165,7 @@ test('runtime without SessionPersistence.delete: service starts, reports delete 
 })
 
 test('rc.6 delete: cleanup routes through the adapter primitive and clears the archive set', async () => {
+  writeSessionLog('B')
   const { ctx, state } = makeRc6Context({ archivedSessionIds: ['B'] })
   const service = startService(ctx)
   const result = await service.delete({ sessionId: 'B' })
@@ -148,6 +174,7 @@ test('rc.6 delete: cleanup routes through the adapter primitive and clears the a
 })
 
 test('future native runtime: delete cleanup calls the official unarchiveSession', async () => {
+  writeSessionLog('B')
   const { ctx, state } = makeRc6Context({ archivedSessionIds: ['B'] })
   let unarchiveCalls = 0
   ctx.workspaceRegistry.unarchiveSession = async () => { unarchiveCalls++ }
@@ -159,20 +186,21 @@ test('future native runtime: delete cleanup calls the official unarchiveSession'
 })
 
 test('delete: answers session-not-found when the id is not in the archived set', async () => {
+  writeSessionLog('s1')
   const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['s1'] })
-  let deleteCalls = 0
-  ctx.sessionPersistence.delete = async () => { deleteCalls++ }
   const service = startService(ctx)
 
   const result = await service.delete({ sessionId: 'not-archived' })
 
   assert.equal(result.code, 'session-not-found')
   assert.equal(result.sessionId, 'not-archived')
-  assert.equal(deleteCalls, 0)
+  // Nothing was removed for an id the archive set never held.
+  assert.equal(existsSync(fixtureLogPath('s1')), true)
 })
 
-test('delete: removes one session, keeps the rest, and detaches it from workspace accounting', async () => {
-  const deleted: string[] = []
+test('delete: removes the durable log of one session, keeps the rest, and detaches it from workspace accounting', async () => {
+  writeSessionLog('s1', { olderGeneration: true })
+  writeSessionLog('s2')
   const workspace = {
     id: 'workspace-a',
     title: 'A',
@@ -186,29 +214,26 @@ test('delete: removes one session, keeps the rest, and detaches it from workspac
     archivedSessionIds: ['s1', 's2'],
     workspaces: [workspace],
   })
-  ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
-    deleted.push(sessionId as string)
-  }
   const service = startService(ctx)
 
   const result = await service.delete({ sessionId: 's1' })
 
   assert.deepEqual(result, { deleted: true })
-  assert.deepEqual(deleted, ['s1'])
+  // The log really is gone from disk, every generation of it.
+  assert.equal(existsSync(fixtureLogPath('s1')), false)
+  assert.equal(existsSync(fixtureLogPath('s1').replace('session.v4', 'session.v3')), false)
+  assert.equal(existsSync(fixtureLogPath('s2')), true)
   assert.deepEqual(workspace.sessionIds, ['s2'])
   assert.deepEqual(state.archivedSessionIds, ['s2'])
 })
 
 test('delete: second protection inside deleteOne rejects a session that became running after the first check', async () => {
+  writeSessionLog('s1')
   let agentChecks = 0
-  let deleteCalls = 0
   const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['s1'] })
   ctx.agents.get = () => {
     agentChecks++
     return agentChecks > 1 ? { status: 'running' } : undefined
-  }
-  ctx.sessionPersistence.delete = async () => {
-    deleteCalls++
   }
   const service = startService(ctx)
 
@@ -216,7 +241,9 @@ test('delete: second protection inside deleteOne rejects a session that became r
 
   assert.equal(result.code, 'session-running')
   assert.equal(result.sessionId, 's1')
-  assert.equal(deleteCalls, 0)
+  // The refusal is what keeps a live writer from recreating a headerless log,
+  // so the artifact must still be intact.
+  assert.equal(existsSync(fixtureLogPath('s1')), true)
 })
 
 test('future native runtime: service reports native restore capability', async () => {
@@ -238,6 +265,7 @@ interface FakeWorkspace {
 function makeWorkspaceContext(initial: {
   archivedSessionIds?: string[]
   workspaces?: FakeWorkspace[]
+  headers?: { id: SessionId; createdAt: number; cwd?: string }[]
 } = {}) {
   const state: FakeState = {
     workspaceIds: [],
@@ -258,12 +286,17 @@ function makeWorkspaceContext(initial: {
       },
     },
     sessionPersistence: {
+      root: fixtureRoot(),
       listSnapshots: async () =>
         (initial.archivedSessionIds ?? []).map(id => ({
-          header: { id: id as SessionId, createdAt: 1_700_000_000_000 },
+          header: { id: id as SessionId, createdAt: 1_700_000_000_000, cwd: FIXTURE_CWD },
         })),
       readFrom: async () => ({ events: [] }),
-      delete: async () => {},
+      listArtifacts: async () =>
+        (initial.archivedSessionIds ?? []).map(id => ({
+          header: fixtureHeader(id),
+          path: fixtureLogPath(id),
+        })),
     },
     sessions: { get: () => undefined },
     agents: { get: () => undefined },
@@ -274,9 +307,9 @@ function makeWorkspaceContext(initial: {
   return { ctx, state }
 }
 
-test('deleteWorkspace on runtime without SessionPersistence.delete: answers workspace-delete-unsupported', async () => {
+test('deleteWorkspace on a runtime without an artifact surface: answers workspace-delete-unsupported', async () => {
   const { ctx } = makeWorkspaceContext({ archivedSessionIds: ['a-1'] })
-  delete ctx.sessionPersistence.delete
+  delete ctx.sessionPersistence.listArtifacts
   const service = startService(ctx)
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
   assert.equal(result.code, 'workspace-delete-unsupported')
@@ -378,16 +411,22 @@ test('deleteWorkspace: empty-string workspaceId is not treated as the ungrouped 
 })
 
 test('deleteWorkspace: reports partial progress when a session delete fails', async () => {
-  let deleteCalls = 0
+  writeSessionLog('a-1')
+  writeSessionLog('a-2')
   const { ctx, state } = makeWorkspaceContext({
     archivedSessionIds: ['a-1', 'a-2'],
     workspaces: [
       { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1', 'a-2'], detachSession: async () => {} },
     ],
   })
-  ctx.sessionPersistence.delete = async (sessionId: SessionId) => {
-    deleteCalls++
-    if (sessionId === 'a-2') throw new Error('storage boom')
+  // Fail the second session's path resolution — the boundary where a real
+  // filesystem failure would surface.
+  const baseListArtifacts = ctx.sessionPersistence.listArtifacts!
+  let seen = 0
+  ctx.sessionPersistence.listArtifacts = async (signal?: AbortSignal) => {
+    seen++
+    if (seen > 1) throw new Error('storage boom')
+    return await baseListArtifacts(signal)
   }
   const service = startService(ctx)
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
@@ -395,10 +434,15 @@ test('deleteWorkspace: reports partial progress when a session delete fails', as
   assert.equal(result.deletedCount, 1)
   assert.equal(result.failedSessionId, 'a-2')
   assert.deepEqual(state.archivedSessionIds, ['a-2'])
+  // The first session's log is really gone; the failed one is untouched.
+  assert.equal(existsSync(fixtureLogPath('a-1')), false)
+  assert.equal(existsSync(fixtureLogPath('a-2')), true)
 })
 
 test('deleteWorkspace: re-checks running state during the loop and reports partial if a session becomes running', async () => {
-  let deleteCalls = 0
+  writeSessionLog('a-1')
+  writeSessionLog('a-2')
+  let removals = 0
   const { ctx, state } = makeWorkspaceContext({
     archivedSessionIds: ['a-1', 'a-2'],
     workspaces: [
@@ -406,22 +450,29 @@ test('deleteWorkspace: re-checks running state during the loop and reports parti
     ],
   })
   ctx.agents.get = (sessionId: SessionId) => {
-    if (sessionId === 'a-2' && deleteCalls > 0) return { status: 'running' }
+    if (sessionId === 'a-2' && removals > 0) return { status: 'running' }
     return undefined
   }
-  ctx.sessionPersistence.delete = async () => {
-    deleteCalls++
+  const measureRemoval = ctx.sessionPersistence.listArtifacts!
+  ctx.sessionPersistence.listArtifacts = async (signal?: AbortSignal) => {
+    // Count real removals as they happen, so the loop's re-check observes the
+    // same "one was already deleted" state a live runtime would.
+    removals++
+    return await measureRemoval(signal)
   }
+  removals = 0
   const service = startService(ctx)
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
   assert.equal(result.code, 'workspace-delete-partial')
   assert.equal(result.deletedCount, 1)
   assert.equal(result.failedSessionId, 'a-2')
-  assert.equal(deleteCalls, 1)
   assert.deepEqual(state.archivedSessionIds, ['a-2'])
+  assert.equal(existsSync(fixtureLogPath('a-1')), false)
+  assert.equal(existsSync(fixtureLogPath('a-2')), true)
 })
 
 test('deleteWorkspace: aborts with workspace-sessions-running if the first session becomes running before deletion', async () => {
+  writeSessionLog('a-1')
   let agentCalls = 0
   const { ctx, state } = makeWorkspaceContext({
     archivedSessionIds: ['a-1'],
@@ -434,18 +485,18 @@ test('deleteWorkspace: aborts with workspace-sessions-running if the first sessi
     if (sessionId === 'a-1' && agentCalls > 1) return { status: 'running' }
     return undefined
   }
-  ctx.sessionPersistence.delete = async () => {
-    throw new Error('should not be called')
-  }
   const service = startService(ctx)
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
   assert.equal(result.code, 'workspace-sessions-running')
   assert.equal(result.runningSessionCount, 1)
+  assert.equal(existsSync(fixtureLogPath('a-1')), true)
   assert.deepEqual(state.archivedSessionIds, ['a-1'])
 })
 
 test('deleteWorkspace: rejects a live session in preflight before deleting anything', async () => {
-  let deleteCalls = 0
+  writeSessionLog('a-1')
+  writeSessionLog('a-2')
+  writeSessionLog('a-3')
   const { ctx, state } = makeWorkspaceContext({
     archivedSessionIds: ['a-1', 'a-2', 'a-3'],
     workspaces: [
@@ -454,7 +505,6 @@ test('deleteWorkspace: rejects a live session in preflight before deleting anyth
   })
   ctx.sessions.get = (sessionId: SessionId) =>
     sessionId === 'a-2' ? { header: { id: sessionId, createdAt: 1 } } as never : undefined
-  ctx.sessionPersistence.delete = async () => { deleteCalls++ }
   const service = startService(ctx)
 
   const result = await service.deleteWorkspace({ workspaceId: 'a' })
@@ -462,7 +512,10 @@ test('deleteWorkspace: rejects a live session in preflight before deleting anyth
   assert.equal(result.code, 'workspace-sessions-running')
   assert.equal(result.runningSessionCount, 1)
   assert.equal(result.sessionId, 'a-2')
-  assert.equal(deleteCalls, 0)
+  // One live session aborts the whole batch: no partial deletion.
+  assert.equal(existsSync(fixtureLogPath('a-1')), true)
+  assert.equal(existsSync(fixtureLogPath('a-2')), true)
+  assert.equal(existsSync(fixtureLogPath('a-3')), true)
   assert.deepEqual(state.archivedSessionIds, ['a-1', 'a-2', 'a-3'])
 })
 
@@ -631,4 +684,136 @@ test('live session: the legacy events getter still wins when the runtime ships i
 
   assert.equal(result.items[0]?.title, '旧 getter 标题')
   assert.equal(result.items[0]?.lastActivityAt, 1_700_000_000_800)
+})
+
+/**
+ * Workspace-registration removal is a separate action from clearing a group's
+ * archived sessions. Its contract: the registration goes, the sessions and the
+ * archive set stay — which is exactly the official `WorkspaceRegistry.delete()`
+ * semantics the endpoint delegates to.
+ */
+function makeRegistrationContext(initial: {
+  archivedSessionIds?: string[]
+  workspaces?: FakeWorkspace[]
+  deleteImpl?: (workspaceId: string) => Promise<boolean>
+} = {}) {
+  const { deleteImpl, ...rest } = initial
+  const { ctx, state } = makeWorkspaceContext(rest)
+  let deleteCalls = 0
+  const deletedIds: string[] = []
+  ctx.workspaceRegistry.delete = async (workspaceId: string) => {
+    deleteCalls++
+    deletedIds.push(workspaceId)
+    if (deleteImpl !== undefined) return await deleteImpl(workspaceId)
+    return true
+  }
+  return {
+    ctx,
+    state,
+    deleteCalls: () => deleteCalls,
+    deletedIds: () => deletedIds,
+  }
+}
+
+test('deleteWorkspaceRegistration: removes the registration and reports the capability', async () => {
+  const { ctx, deleteCalls, deletedIds } = makeRegistrationContext()
+  const service = startService(ctx)
+
+  const list = await service.list()
+  assert.equal(list.capabilities.workspaceDelete, 'native')
+
+  const result = await service.deleteWorkspaceRegistration({ workspaceId: 'a' })
+
+  assert.deepEqual(result, { deleted: true, workspaceId: 'a' })
+  assert.equal(deleteCalls(), 1)
+  assert.deepEqual(deletedIds(), ['a'])
+})
+
+test('deleteWorkspaceRegistration: answers workspace-not-found for an unknown id instead of throwing', async () => {
+  const { ctx } = makeRegistrationContext({ deleteImpl: async () => false })
+  const service = startService(ctx)
+
+  const result = await service.deleteWorkspaceRegistration({ workspaceId: 'ghost' })
+
+  assert.equal(result.code, 'workspace-not-found')
+  assert.equal(result.workspaceId, 'ghost')
+})
+
+test('deleteWorkspaceRegistration: refuses an empty id without calling the registry', async () => {
+  const { ctx, deleteCalls } = makeRegistrationContext()
+  const service = startService(ctx)
+
+  const result = await service.deleteWorkspaceRegistration({ workspaceId: '' })
+
+  assert.equal(result.code, 'workspace-not-found')
+  assert.equal(deleteCalls(), 0)
+})
+
+test('deleteWorkspaceRegistration: answers unsupported on a runtime whose registry has no delete', async () => {
+  const { ctx, state } = makeWorkspaceContext({ archivedSessionIds: ['a-1'] })
+  const service = startService(ctx)
+
+  const list = await service.list()
+  assert.equal(list.capabilities.workspaceDelete, 'unsupported')
+
+  const result = await service.deleteWorkspaceRegistration({ workspaceId: 'a' })
+
+  assert.equal(result.code, 'workspace-registration-delete-unsupported')
+  // The archive set is untouched: registration removal is not session deletion.
+  assert.deepEqual(state.archivedSessionIds, ['a-1'])
+})
+
+test('deleteWorkspaceRegistration: never touches the archive set or session logs', async () => {
+  writeSessionLog('a-1')
+  const { ctx, state } = makeRegistrationContext({
+    archivedSessionIds: ['a-1'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1'], detachSession: async () => {} },
+    ],
+  })
+  const service = startService(ctx)
+
+  const result = await service.deleteWorkspaceRegistration({ workspaceId: 'a' })
+
+  assert.deepEqual(result, { deleted: true, workspaceId: 'a' })
+  // Sessions survive as Ungrouped: their logs stay and they stay archived.
+  assert.equal(existsSync(fixtureLogPath('a-1')), true)
+  assert.deepEqual(state.archivedSessionIds, ['a-1'])
+})
+
+test('deleteWorkspaceRegistration: a failing registry write propagates instead of reporting success', async () => {
+  const { ctx } = makeRegistrationContext({
+    deleteImpl: async () => { throw new Error('registry write failed') },
+  })
+  const service = startService(ctx)
+
+  await assert.rejects(
+    () => service.deleteWorkspaceRegistration({ workspaceId: 'a' }),
+    /registry write failed/,
+  )
+})
+
+test('clearing a group and removing its registration stay independent actions', async () => {
+  writeSessionLog('a-1')
+  const { ctx, state, deleteCalls } = makeRegistrationContext({
+    archivedSessionIds: ['a-1'],
+    workspaces: [
+      { id: 'a', title: 'A', path: '/a', sessionIds: ['a-1'], detachSession: async () => {} },
+    ],
+  })
+  const service = startService(ctx)
+
+  // Clearing the group's archived sessions must not remove the registration.
+  const cleared = await service.deleteWorkspace({ workspaceId: 'a' })
+  assert.deepEqual(cleared, { deleted: true, deletedCount: 1 })
+  assert.equal(deleteCalls(), 0)
+
+  // And removing the registration must not delete any session.
+  writeSessionLog('a-2')
+  const second = makeRegistrationContext({ archivedSessionIds: ['a-2'] })
+  const secondService = startService(second.ctx)
+  await secondService.deleteWorkspaceRegistration({ workspaceId: 'a' })
+  assert.equal(existsSync(fixtureLogPath('a-2')), true)
+  assert.deepEqual(second.state.archivedSessionIds, ['a-2'])
+  assert.deepEqual(state.archivedSessionIds, [])
 })

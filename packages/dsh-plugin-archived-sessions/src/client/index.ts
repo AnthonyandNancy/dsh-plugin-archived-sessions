@@ -29,6 +29,8 @@ import type {
   ArchivedSessionRestoreValue,
   ArchivedWorkspaceDeleteRequest,
   ArchivedWorkspaceDeleteValue,
+  ArchivedWorkspaceRegistrationDeleteRequest,
+  ArchivedWorkspaceRegistrationDeleteValue,
 } from '../types.ts'
 
 export { ArchivedSessionsStore } from './store.ts'
@@ -48,6 +50,9 @@ interface MountedArchivedSessionsRemote {
     restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
     delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
     deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
+    deleteWorkspaceRegistration(
+      request: ArchivedWorkspaceRegistrationDeleteRequest,
+    ): Promise<RemoteResult<ArchivedWorkspaceRegistrationDeleteValue>>
   }
 }
 
@@ -74,6 +79,7 @@ const ArchivedSessionsSectionPlugin = {
       restore: request => mounted.archivedSessions.restore(request),
       delete: request => mounted.archivedSessions.delete(request),
       deleteWorkspace: request => mounted.archivedSessions.deleteWorkspace(request),
+      deleteWorkspaceRegistration: request => mounted.archivedSessions.deleteWorkspaceRegistration(request),
     })
 
     // Realtime sync: the workspace runtime already folds

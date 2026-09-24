@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const REQUIRED_ENDPOINTS = ['list', 'restore', 'delete', 'deleteWorkspace']
+const REQUIRED_ENDPOINTS = ['list', 'restore', 'delete', 'deleteWorkspace', 'deleteWorkspaceRegistration']
 const ARTIFACTS = ['lib/typert.host.js', 'lib/typert.remote-client.js']
 
 function verifyArtifact(relativePath) {

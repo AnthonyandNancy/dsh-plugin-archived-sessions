@@ -21,6 +21,8 @@ import type {
   ArchivedSessionsCapabilities,
   ArchivedWorkspaceDeleteRequest,
   ArchivedWorkspaceDeleteValue,
+  ArchivedWorkspaceRegistrationDeleteRequest,
+  ArchivedWorkspaceRegistrationDeleteValue,
 } from '../types.ts'
 
 export type ArchivedSort = 'lastActivity' | 'createdAt'
@@ -44,7 +46,19 @@ export interface ArchivedSessionsRemote {
   restore(request: ArchivedSessionRestoreRequest): Promise<RemoteResult<ArchivedSessionRestoreValue>>
   delete(request: ArchivedSessionDeleteRequest): Promise<RemoteResult<ArchivedSessionDeleteValue>>
   deleteWorkspace(request: ArchivedWorkspaceDeleteRequest): Promise<RemoteResult<ArchivedWorkspaceDeleteValue>>
+  deleteWorkspaceRegistration(
+    request: ArchivedWorkspaceRegistrationDeleteRequest,
+  ): Promise<RemoteResult<ArchivedWorkspaceRegistrationDeleteValue>>
 }
+
+/**
+ * Outcome of a Workspace-registration removal.
+ *
+ * `not-found` is not an error — the registry treats an unknown id as an
+ * idempotent no-op, so the requested end state already holds. The caller
+ * still has to distinguish it to avoid claiming a removal it did not perform.
+ */
+export type WorkspaceRegistrationOutcome = 'deleted' | 'not-found'
 
 const INITIAL_STATE: ArchivedSessionsState = {
   status: 'loading',
@@ -53,7 +67,7 @@ const INITIAL_STATE: ArchivedSessionsState = {
   error: null,
   filter: '',
   sort: 'lastActivity',
-  capabilities: { restore: 'unsupported', delete: 'unsupported' },
+  capabilities: { restore: 'unsupported', delete: 'unsupported', workspaceDelete: 'unsupported' },
 }
 
 export class ArchivedSessionsStore {
@@ -149,6 +163,27 @@ export class ArchivedSessionsStore {
         // Keep the original partial-delete error; refresh failure must not mask it.
       }
     }
+    throw error
+  }
+
+  /**
+   * Remove one DSH Workspace registration from the workspace list. The
+   * directory, its files and every session log are retained; the archived rows
+   * stay in this list and simply fall back to the unknown-workspace group once
+   * their `workspaceId` no longer resolves.
+   *
+   * No local removal happens on the rows, deliberately: after the registration
+   * is gone the same sessions are still archived, so dropping them locally
+   * would show a state the next refresh contradicts. Only the next `list()`
+   * decides where they belong.
+   */
+  async deleteWorkspaceRegistration(workspaceId: string): Promise<WorkspaceRegistrationOutcome> {
+    const result = await this.remote.deleteWorkspaceRegistration({ workspaceId })
+    if (!result.ok) throw new Error(result.error.message)
+    if ('deleted' in result.value) return 'deleted'
+    const error = new Error(result.value.message)
+    Object.assign(error, result.value)
+    if (result.value.code === 'workspace-not-found') return 'not-found'
     throw error
   }
 

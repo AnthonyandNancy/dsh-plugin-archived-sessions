@@ -86,6 +86,7 @@ const groupContainerStyle: CSSProperties = {
 const groupHeaderStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
+  flexWrap: 'wrap',
   gap: '8px',
   width: '100%',
   padding: '12px 4px',
@@ -144,9 +145,11 @@ export function ArchivedSessionsSection({
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [deleting, setDeleting] = useState<ArchivedSessionItem | null>(null)
   const [deletingWorkspace, setDeletingWorkspace] = useState<ArchivedGroup | null>(null)
+  const [removingWorkspace, setRemovingWorkspace] = useState<ArchivedGroup | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set())
   const [visibleCounts, setVisibleCounts] = useState<Map<string, number>>(() => new Map())
@@ -236,6 +239,7 @@ export function ArchivedSessionsSection({
     setAcknowledged(false)
     setBusyId(`workspace:${target.key}`)
     setActionError(null)
+    setActionNotice(null)
     void (async () => {
       try {
         await store.deleteWorkspace(workspaceKey)
@@ -258,6 +262,51 @@ export function ArchivedSessionsSection({
           setActionError(t('deleteWorkspaceUnavailable'))
         } else {
           setActionError(t('deleteWorkspaceFailed'))
+        }
+      } finally {
+        setBusyId(null)
+      }
+    })()
+  }
+
+  /**
+   * Remove the Workspace registration behind one group.
+   *
+   * The archived rows are deliberately NOT removed locally: after the
+   * registration disappears those sessions are still archived, they simply
+   * have no workspace left to map to, so the next list is what decides they
+   * belong under 未知工作区. A quiet refresh reconciles that without flashing
+   * the page back into a loading state.
+   */
+  const handleRemoveWorkspaceRegistration = (): void => {
+    if (removingWorkspace === null) return
+    const target = removingWorkspace
+    setRemovingWorkspace(null)
+    setAcknowledged(false)
+    setActionError(null)
+    setActionNotice(null)
+    if (target.key === '__ungrouped__') {
+      // There is no registration behind the ungrouped group.
+      setActionError(t('removeWorkspaceRegistrationNotFound'))
+      return
+    }
+    setBusyId(`workspace:${target.key}`)
+    void (async () => {
+      try {
+        const outcome = await store.deleteWorkspaceRegistration(target.key)
+        if (outcome === 'not-found') {
+          setActionNotice(t('removeWorkspaceRegistrationNotFound'))
+        } else {
+          setActionNotice(t('removeWorkspaceRegistrationDone').replace('{title}', target.title))
+        }
+        await store.refresh()
+      } catch (error: unknown) {
+        console.error('archived-sessions: archivedSessions/deleteWorkspaceRegistration failed', error)
+        const code = (error as { code?: string }).code
+        if (code === 'workspace-registration-delete-unsupported') {
+          setActionError(t('removeWorkspaceRegistrationUnavailable'))
+        } else {
+          setActionError(t('removeWorkspaceRegistrationFailed'))
         }
       } finally {
         setBusyId(null)
@@ -291,6 +340,12 @@ export function ArchivedSessionsSection({
       {actionError !== null && (
         <p style={{ margin: '0 0 8px', color: 'var(--dsw-alias-state-error-primary)', fontSize: '13px' }}>
           {actionError}
+        </p>
+      )}
+
+      {actionNotice !== null && (
+        <p style={{ margin: '0 0 8px', color: 'var(--dsw-alias-text-secondary)', fontSize: '13px' }}>
+          {actionNotice}
         </p>
       )}
 
@@ -331,22 +386,45 @@ export function ArchivedSessionsSection({
                 </span>
               </button>
               {!searching && (
-                <Button
-                  variant="ghost"
-                  style={{ color: 'var(--dsw-alias-state-error-primary)' }}
-                  disabled={
-                    busyId === `workspace:${group.key}`
-                    || state.capabilities.delete !== 'native'
-                  }
-                  title={state.capabilities.delete !== 'native' ? t('deleteUnavailable') : undefined}
-                  onClick={() => {
-                    setDeleting(null)
-                    setDeletingWorkspace(group)
-                    setAcknowledged(false)
-                  }}
-                >
-                  {busyId === `workspace:${group.key}` ? t('deletingWorkspace') : t('deleteWorkspace')}
-                </Button>
+                <>
+                  <Button
+                    variant="ghost"
+                    style={{ color: 'var(--dsw-alias-state-error-primary)' }}
+                    disabled={
+                      busyId === `workspace:${group.key}`
+                      || state.capabilities.delete !== 'native'
+                    }
+                    title={state.capabilities.delete !== 'native' ? t('deleteUnavailable') : undefined}
+                    onClick={() => {
+                      setDeleting(null)
+                      setDeletingWorkspace(group)
+                      setAcknowledged(false)
+                    }}
+                  >
+                    {busyId === `workspace:${group.key}` ? t('deletingWorkspace') : t('deleteWorkspace')}
+                  </Button>
+                  {group.key !== '__ungrouped__' && (
+                    <Button
+                      variant="ghost"
+                      disabled={
+                        busyId === `workspace:${group.key}`
+                        || state.capabilities.workspaceDelete !== 'native'
+                      }
+                      title={
+                        state.capabilities.workspaceDelete !== 'native'
+                          ? t('removeWorkspaceRegistrationUnavailable')
+                          : undefined
+                      }
+                      onClick={() => {
+                        setDeletingWorkspace(null)
+                        setRemovingWorkspace(group)
+                        setAcknowledged(false)
+                      }}
+                    >
+                      {t('removeWorkspaceRegistration')}
+                    </Button>
+                  )}
+                </>
               )}
             </div>
             {expanded && (
@@ -440,6 +518,23 @@ export function ArchivedSessionsSection({
           onAcknowledgedChange={setAcknowledged}
           onCancel={() => { setDeletingWorkspace(null); setAcknowledged(false) }}
           onConfirm={() => { handleDeleteWorkspace() }}
+        />
+      )}
+
+      {removingWorkspace !== null && (
+        <RiskConfirmation
+          open
+          title={t('removeWorkspaceRegistrationTitle')}
+          description={t('removeWorkspaceRegistrationDescription')
+            .replace('{title}', removingWorkspace.title)}
+          acknowledgeLabel={t('removeWorkspaceRegistrationAcknowledge')}
+          cancelLabel={t('cancel')}
+          closeLabel={t('close')}
+          confirmLabel={t('removeWorkspaceRegistration')}
+          acknowledged={acknowledged}
+          onAcknowledgedChange={setAcknowledged}
+          onCancel={() => { setRemovingWorkspace(null); setAcknowledged(false) }}
+          onConfirm={() => { handleRemoveWorkspaceRegistration() }}
         />
       )}
     </div>

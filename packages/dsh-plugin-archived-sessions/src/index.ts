@@ -2,21 +2,39 @@
  * Archived Sessions plugin Host half.
  *
  * Exposes the official DSH Typert Remote API consumed by the Settings page:
- * list archived sessions, restore one, and permanently delete one. Restore is
+ * list archived sessions, restore one, permanently delete one, permanently
+ * delete one archived group, and remove a Workspace registration. Restore is
  * routed through the plugin's own {@link ArchiveCompatibilityAdapter}, which
  * capability-detects the runtime — the official
  * `WorkspaceRegistry.unarchiveSession` when it exists, the rc.6
  * `enqueueOperation` / `requireState` / `setState` mutation surface
  * otherwise — so the service starts on every DSH build and degrades to a
- * `restore-unsupported` domain result only where no path exists. Permanent
- * delete is similarly capability-gated: deletion reuses the official
- * first-party orchestration primitive `SessionPersistence.delete` (never
- * filesystem paths, never `workspaceRegistry.delete()`) when the runtime
- * ships it; on runtimes without it the capability reports `unsupported`,
- * the UI disables the delete action, and the Remote answers
- * `delete-unsupported` instead of failing plugin startup. The archive-set
- * cleanup routes through the same adapter primitive. The plugin never
- * touches session files directly.
+ * `restore-unsupported` domain result only where no path exists.
+ *
+ * Permanent delete has no official backing in any released DSH: the
+ * persistence seam is `create` / `open` / `stat` / `list` / `flush`, and the
+ * shipped JSONL backend documents that logs accumulate under its root "until
+ * removed externally". The Host therefore removes the durable log itself,
+ * through {@link SessionLogDeleter}, which uses only the backend's own
+ * listing surfaces (`listArtifacts`, falling back to `locate`) to resolve the
+ * authoritative artifact path, refuses any path outside the backend's root,
+ * and removes only session-owned log artifacts. On a runtime exposing neither
+ * surface the capability reports `unsupported`, the UI disables the action,
+ * and the Remote answers `delete-unsupported` instead of failing startup. The
+ * archive-set cleanup after a delete routes through the same adapter
+ * primitive as restore.
+ *
+ * Removing a Workspace registration goes through
+ * {@link WorkspaceRegistrationDeleter}: the official
+ * `WorkspaceRegistry.delete(id)`, whose semantics are deliberately
+ * non-destructive — the registration leaves the workspace list while its
+ * directory and every session log are retained, and its sessions fall back to
+ * Ungrouped.
+ *
+ * Every durable removal refuses to run against a live or running session: the
+ * JSONL backend reopens a session's log by path on each append, so deleting a
+ * log that still has a writer would recreate a headerless file instead of
+ * producing a clean absence.
  *
  * @module dsh-plugin-archived-sessions
  */
@@ -26,6 +44,8 @@ import { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session/types'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { ArchiveCompatibilityAdapter } from './host/compat/restore.ts'
+import { SessionLogDeleter } from './host/session-log.ts'
+import { WorkspaceRegistrationDeleter } from './host/workspace-registration.ts'
 import type {
   ArchivedSessionDeleteRequest,
   ArchivedSessionDeleteValue,
@@ -40,6 +60,10 @@ import type {
   ArchivedWorkspaceDeleteRequest,
   ArchivedWorkspaceDeleteValue,
 } from './types.ts'
+import type {
+  ArchivedWorkspaceRegistrationDeleteRequest,
+  ArchivedWorkspaceRegistrationDeleteValue,
+} from './types.ts'
 
 /** Minimal workspace shape used by the archived-sessions host surface. */
 interface ArchivedWorkspace {
@@ -52,14 +76,16 @@ interface ArchivedWorkspace {
 
 /**
  * Minimal workspace-registry surface used by the archived-sessions host.
- * `unarchiveSession` is intentionally optional: rc.6 runtimes expose only the
- * archive set and their internal mutation path, which the compatibility
- * adapter probes at runtime.
+ * `unarchiveSession` is intentionally optional: rc.6–0.1.5 runtimes expose
+ * only the archive set and their internal mutation path, which the
+ * compatibility adapter probes at runtime. `delete` is the official
+ * registration-removal primitive and is optional for the same reason.
  */
 interface ArchivedWorkspaceRegistry {
   archivedSessionIds: readonly SessionId[]
   list(): readonly ArchivedWorkspace[]
   unarchiveSession?(sessionId: SessionId): Promise<void>
+  delete?(workspaceId: string): Promise<boolean>
 }
 
 /**
@@ -73,16 +99,22 @@ interface ArchivedWorkspaceRegistry {
  *   - `readFrom(id, 0)` (rc.5–rc.8) and `open(id, 'read')` + a read handle
  *     (0.1.5+) both read one session's event log; a runtime with neither still
  *     lists header-only rows.
- *   - `delete` is optional because older runtimes may lack the orchestration;
- *     when absent, the delete capability reports `unsupported` and the plugin
- *     keeps running with the delete action disabled.
+ *   - `root`, `listArtifacts()` and `locate()` are the JSONL backend's
+ *     artifact-position surfaces and back permanent delete. DSH has no
+ *     session-deletion API in any released version, so removal needs a way to
+ *     name the stored artifact; without one the delete capability reports
+ *     `unsupported` and the plugin keeps running with the actions disabled.
  */
 interface ArchivedSessionPersistence {
+  readonly root?: string
   listSnapshots?(): Promise<readonly { header: SessionHeader }[]>
   list?(): Promise<readonly { header: SessionHeader }[]>
   readFrom?(sessionId: SessionId, offset: number): Promise<{ events: readonly SessionEvent[] }>
   open?(sessionId: SessionId, access: 'read'): Promise<ArchivedSessionHandle>
-  delete?(sessionId: SessionId, signal?: AbortSignal): Promise<void>
+  listArtifacts?(signal?: AbortSignal): Promise<
+    readonly { readonly header: SessionHeader; readonly path: string }[]
+  >
+  locate?(header: SessionHeader): { readonly kind?: string; readonly path: string } | undefined
 }
 
 /** Minimal read-handle surface of the 0.1.5+ `SessionPersistence.open` contract. */
@@ -253,14 +285,29 @@ export class ArchivedSessionsService extends TypertRemoteService {
   static inject = ['workspaceRegistry', 'sessionPersistence', 'sessions', 'agents']
 
   private readonly archiveAdapter: ArchiveCompatibilityAdapter
+  private readonly sessionLogs: SessionLogDeleter
+  private readonly workspaceRegistrations: WorkspaceRegistrationDeleter
 
   constructor(ctx: Context) {
-    // No startup capability gate: permanent delete is capability-detected
-    // like restore. On runtimes without `SessionPersistence.delete` the
-    // capability reports `unsupported`, the UI disables delete buttons, and
-    // the Remote answers `delete-unsupported` — never a startup failure.
+    // No startup capability gate: every destructive path is capability-detected
+    // rather than assumed. On a runtime that cannot locate a stored session log
+    // the capability reports `unsupported`, the UI disables the delete actions,
+    // and the Remote answers a domain result — never a startup failure.
     super(ctx, 'archivedSessions')
     this.archiveAdapter = new ArchiveCompatibilityAdapter(ctx.workspaceRegistry)
+    this.sessionLogs = new SessionLogDeleter({
+      // The seam exposes `root` only on the shipped backend; the empty-string
+      // fallback keeps construction total, and every path is still fenced by
+      // the resolved-root prefix check before anything is removed.
+      root: ctx.sessionPersistence.root ?? '',
+      ...(typeof ctx.sessionPersistence.listArtifacts === 'function'
+        ? { listArtifacts: ctx.sessionPersistence.listArtifacts.bind(ctx.sessionPersistence) }
+        : {}),
+      ...(typeof ctx.sessionPersistence.locate === 'function'
+        ? { locate: ctx.sessionPersistence.locate.bind(ctx.sessionPersistence) }
+        : {}),
+    })
+    this.workspaceRegistrations = new WorkspaceRegistrationDeleter(ctx.workspaceRegistry)
   }
 
   /** List all currently archived sessions with display metadata. */
@@ -355,11 +402,15 @@ export class ArchivedSessionsService extends TypertRemoteService {
     return items
   }
 
-  /** Which runtime paths back restore and permanent delete. */
+  /** Which runtime paths back restore, permanent delete and registration removal. */
   private capabilities(): ArchivedSessionsCapabilities {
     return {
       restore: this.archiveAdapter.getRestoreCapability(),
-      delete: typeof this.ctx.sessionPersistence.delete === 'function' ? 'native' : 'unsupported',
+      // `native` here means "the Host can remove the durable log", not "the
+      // runtime ships a delete API" — no released DSH ships one. The JSONL
+      // backend's artifact-position surfaces are what make removal possible.
+      delete: this.sessionLogs.getDeleteCapability() === 'unsupported' ? 'unsupported' : 'native',
+      workspaceDelete: this.workspaceRegistrations.getDeleteCapability(),
     }
   }
 
@@ -382,11 +433,19 @@ export class ArchivedSessionsService extends TypertRemoteService {
     return { restored: true }
   }
 
-  /** Permanently delete one session and its durable history. */
+  /**
+   * Permanently delete one session and its durable history.
+   *
+   * The capability gate answers a domain result instead of throwing, so a
+   * client that calls this on an unsupported runtime renders a capability gap
+   * rather than a transport failure. The running/live preflight is repeated
+   * here only to answer with the domain result; `deleteOne` owns the
+   * authoritative check.
+   */
   @Remote('delete')
   async delete(request: ArchivedSessionDeleteRequest): Promise<ArchivedSessionDeleteValue> {
     const sessionId = SessionId(request.sessionId)
-    if (typeof this.ctx.sessionPersistence.delete !== 'function') {
+    if (this.sessionLogs.getDeleteCapability() === 'unsupported') {
       return {
         code: 'delete-unsupported',
         sessionId: request.sessionId,
@@ -401,8 +460,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
       await this.deleteOne(sessionId)
     } catch (error: unknown) {
       // Second protection: the session may have become running/live after the
-      // check above and before deleteOne inspected it (the coordinator also
-      // rejects the delete with a "while it is live" persistence error).
+      // check above and before deleteOne inspected it.
       if (isLiveDeleteError(error)) {
         return this.runningError(request.sessionId)
       }
@@ -419,12 +477,21 @@ export class ArchivedSessionsService extends TypertRemoteService {
   }
 
   /**
-   * Shared single-session irreversible delete used by delete and deleteWorkspace.
+   * Shared single-session irreversible delete used by delete, deleteWorkspace
+   * and deleteWorkspaceRegistration's group cleanup.
    *
    * The order is deliberately: (1) preflight — archived membership + not
-   * running/live; (2) `SessionPersistence.delete`; (3) detach every workspace
-   * accounting slot; (4) remove the archive-set entry. Bookkeeping never
-   * pretends success before the durable delete has committed.
+   * running/live; (2) remove the durable log artifacts; (3) detach every
+   * workspace accounting slot; (4) remove the archive-set entry. Bookkeeping
+   * never pretends success before the durable removal has committed, and the
+   * archive-set entry is dropped last so a failed removal leaves the row
+   * visible and retryable instead of orphaning a session the archive set no
+   * longer knows about.
+   *
+   * The live check is not cosmetic: the JSONL backend reopens a session's log
+   * by path on every append, so removing the log of a session that still has a
+   * writer recreates a headerless file on the next batch — "deleted" would
+   * become "corrupt", which is worse than refusing.
    */
   private async deleteOne(sessionId: SessionId): Promise<void> {
     const ctx = this.ctx
@@ -437,11 +504,10 @@ export class ArchivedSessionsService extends TypertRemoteService {
       throw new SessionRunningError(sessionId as string)
     }
 
-    const deleteSession = ctx.sessionPersistence.delete
-    if (deleteSession === undefined) {
-      throw new Error('archived-sessions: sessionPersistence.delete disappeared between capability check and delete')
-    }
-    await deleteSession(sessionId)
+    // The header carries the id and cwd the backend derives its artifact path
+    // from, so a stored header is what makes the locate() fallback possible.
+    const header = (await this.readHeaders()).get(sessionId)
+    await this.sessionLogs.remove(sessionId, header)
 
     for (const workspace of ctx.workspaceRegistry.list()) {
       try {
@@ -467,7 +533,9 @@ export class ArchivedSessionsService extends TypertRemoteService {
    * Permanently deletes all archived sessions in one archived-session
    * workspace group.
    *
-   * Does NOT delete the DSH Workspace registration or project directory.
+   * Does NOT delete the DSH Workspace registration or project directory; that
+   * is a separate action on {@link deleteWorkspaceRegistration}, so neither
+   * button can silently do the other's job.
    *
    * workspaceId omitted means the Unknown Workspace / Ungrouped group.
    */
@@ -476,7 +544,7 @@ export class ArchivedSessionsService extends TypertRemoteService {
     const ctx = this.ctx
     const workspaceId = request.workspaceId
 
-    if (typeof ctx.sessionPersistence.delete !== 'function') {
+    if (this.sessionLogs.getDeleteCapability() === 'unsupported') {
       return {
         code: 'workspace-delete-unsupported',
         workspaceId,
@@ -559,6 +627,54 @@ export class ArchivedSessionsService extends TypertRemoteService {
     }
 
     return { deleted: true, deletedCount }
+  }
+
+  /**
+   * Removes one DSH Workspace registration from the workspace list.
+   *
+   * This is the official `WorkspaceRegistry.delete(id)` semantics and is
+   * deliberately non-destructive: the registration and its position in the
+   * durable display order go away, while the directory, its files and every
+   * session log are retained. Sessions that belonged to it fall back to
+   * Ungrouped, and any of them still in the registry-global archive set keep
+   * their archive entry — that is why this endpoint touches the archive set
+   * not at all, and why the UI keeps "clear this group's archived sessions"
+   * as a separate action.
+   *
+   * Not idempotent-by-error: an unknown id resolves as `workspace-not-found`
+   * (the requested end state already holds) instead of an exception.
+   */
+  @Remote('deleteWorkspaceRegistration')
+  async deleteWorkspaceRegistration(
+    request: ArchivedWorkspaceRegistrationDeleteRequest,
+  ): Promise<ArchivedWorkspaceRegistrationDeleteValue> {
+    const workspaceId = request.workspaceId
+    if (this.workspaceRegistrations.getDeleteCapability() === 'unsupported') {
+      return {
+        code: 'workspace-registration-delete-unsupported',
+        workspaceId,
+        message: 'removing a Workspace registration is unavailable on this DSH runtime',
+      }
+    }
+    if (typeof workspaceId !== 'string' || workspaceId === '') {
+      // An empty or absent id can never name a registration; answering
+      // `not-found` keeps the client from reporting a removal it did not
+      // perform (the ungrouped group has no registration to remove).
+      return {
+        code: 'workspace-not-found',
+        workspaceId,
+        message: 'cannot remove a Workspace registration without a workspace id',
+      }
+    }
+    const deleted = await this.workspaceRegistrations.remove(workspaceId)
+    if (!deleted) {
+      return {
+        code: 'workspace-not-found',
+        workspaceId,
+        message: `cannot remove workspace "${workspaceId}": no such Workspace registration`,
+      }
+    }
+    return { deleted: true, workspaceId }
   }
 
   private runningError(sessionId: string): ArchivedSessionRunningError {

@@ -16,7 +16,11 @@ import type {
   ArchivedSessionsCapabilities,
 } from '../src/types.ts'
 
-const CAPABILITIES: ArchivedSessionsCapabilities = { restore: 'rc6-compat', delete: 'native' }
+const CAPABILITIES: ArchivedSessionsCapabilities = {
+  restore: 'rc6-compat',
+  delete: 'native',
+  workspaceDelete: 'native',
+}
 
 function makeItem(index: number): ArchivedSessionItem {
   return {
@@ -69,6 +73,7 @@ function makeRemote(overrides: Partial<ArchivedSessionsRemote> = {}): ArchivedSe
     restore: async () => ({ ok: true, value: { restored: true } }),
     delete: async () => ({ ok: true, value: { deleted: true } }),
     deleteWorkspace: async () => ({ ok: true, value: { deleted: true, deletedCount: 0 } }),
+    deleteWorkspaceRegistration: async () => ({ ok: true, value: { deleted: true } }),
     ...overrides,
     listCalls: () => listCalls,
   }
@@ -86,7 +91,11 @@ test('initial state: full loading, not refreshing, capabilities unknown until fi
   assert.equal(state.status, 'loading')
   assert.equal(state.refreshing, false)
   assert.deepEqual(state.items, [])
-  assert.deepEqual(state.capabilities, { restore: 'unsupported', delete: 'unsupported' })
+  assert.deepEqual(state.capabilities, {
+    restore: 'unsupported',
+    delete: 'unsupported',
+    workspaceDelete: 'unsupported',
+  })
 })
 
 test('first load keeps the full fetched list and surfaces host capabilities', async () => {
@@ -434,5 +443,64 @@ test('deleteWorkspace surfaces transport failure', async () => {
     }),
   }))
   await assert.rejects(() => store.deleteWorkspace('a'), /boom/)
+})
+
+test('deleteWorkspaceRegistration reports a successful removal without touching the local rows', async () => {
+  const items = [makeWorkspaceItem('a', 'A-1', 1), makeWorkspaceItem('b', 'B-1', 2)]
+  const store = new ArchivedSessionsStore(makeRemote({
+    list: async () => ({ ok: true, value: { items, capabilities: CAPABILITIES } }),
+    deleteWorkspaceRegistration: async () => ({ ok: true, value: { deleted: true } }),
+  }))
+  await store.refresh()
+
+  const outcome = await store.deleteWorkspaceRegistration('a')
+
+  assert.equal(outcome, 'deleted')
+  // The sessions are still archived; only the next list decides they belong
+  // under the unknown-workspace group, so nothing is dropped locally here.
+  assert.equal(store.getSnapshot().items.length, 2)
+})
+
+test('deleteWorkspaceRegistration treats an unknown id as a non-error outcome', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspaceRegistration: async () => ({
+      ok: true,
+      value: { code: 'workspace-not-found', workspaceId: 'ghost', message: 'no such workspace' },
+    }),
+  }))
+
+  const outcome = await store.deleteWorkspaceRegistration('ghost')
+
+  assert.equal(outcome, 'not-found')
+})
+
+test('deleteWorkspaceRegistration surfaces an unsupported runtime as a coded error', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspaceRegistration: async () => ({
+      ok: true,
+      value: {
+        code: 'workspace-registration-delete-unsupported',
+        workspaceId: 'a',
+        message: 'unavailable',
+      },
+    }),
+  }))
+
+  const error = await captureRejection(() => store.deleteWorkspaceRegistration('a'))
+
+  assert.equal(
+    (error as { code?: string }).code,
+    'workspace-registration-delete-unsupported',
+  )
+})
+
+test('deleteWorkspaceRegistration surfaces transport failure', async () => {
+  const store = new ArchivedSessionsStore(makeRemote({
+    deleteWorkspaceRegistration: async () => ({
+      ok: false,
+      error: { code: 'transport', message: 'boom', details: {} },
+    }),
+  }))
+  await assert.rejects(() => store.deleteWorkspaceRegistration('a'), /boom/)
 })
 
