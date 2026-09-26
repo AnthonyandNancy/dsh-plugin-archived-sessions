@@ -89,7 +89,19 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-agent": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-gateway": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.7-rc.1",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "@deepseek-ai/dsh-workspace": "^0.1.7-rc.1",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
@@ -107,7 +119,7 @@
     "check:typert": "node scripts/check-typert-contract.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.build.host.json && tsc --noEmit -p tsconfig.build.client.json",
     "test": "tsc -b tsconfig.build.host.json && node --test tests/restore-adapter.test.ts tests/service.test.ts tests/session-log-delete.test.ts tests/store.test.ts tests/static.test.ts",
-    "prepack": "npm run build",
+    "prepack": "pnpm install --config.node-linker=isolated && npm run build",
     "pack": "npm pack"
   }
 }

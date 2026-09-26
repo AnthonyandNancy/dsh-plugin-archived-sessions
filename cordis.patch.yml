@@ -1,0 +1,12 @@
+# Root bundle shim — a `git` install spec (dsh plugin page "Git 仓库", or
+# `dsh plugin add <repo url>`) resolves to this repository root, so the bundle
+# declaration and its patch layer live here. The inserted row points at the real
+# plugin package at a path relative to this file; the loader anchors relative
+# insert names beside the patch file, so the shipped layout is what counts.
+#
+# Install `packages/dsh-plugin-archived-sessions` directly instead when using
+# the npm sub-package form:
+#   dsh plugin --profile <profile> add "<repo url>#path:packages/dsh-plugin-archived-sessions"
+- insert:
+    - id: archived-sessions
+      name: './packages/dsh-plugin-archived-sessions/lib/index.js'

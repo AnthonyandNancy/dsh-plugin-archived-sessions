@@ -74,8 +74,25 @@ fall back to Ungrouped.
 
 ## Install
 
+From the GitHub repository — the plugin page's **Git 仓库** field takes the same
+spec. The repository root is a bundle shim whose patch layer loads the plugin
+package inside `packages/`:
+
 ```bash
-dsh plugin --profile <profile> add dsh-plugin-archived-sessions
+dsh plugin --profile <profile> add https://github.com/AnthonyandNancy/dsh-plugin-archived-sessions
+```
+
+The first install stops once with a pending build-script decision: pnpm refuses
+to run the git dependency's `prepack` build until that script is allowed. Use
+the plugin page's **允许这些脚本并重试** (or approve the named package and retry)
+and the build runs, then the install finishes. This prompt is pnpm's supply-chain
+guard, not an install failure of the plugin.
+
+To install the plugin package itself instead — the shape the npm release ships —
+point at the subdirectory with pnpm's `#path:` selector:
+
+```bash
+dsh plugin --profile <profile> add "https://github.com/AnthonyandNancy/dsh-plugin-archived-sessions#path:packages/dsh-plugin-archived-sessions"
 ```
 
 Or install from a local tarball:
@@ -83,6 +100,10 @@ Or install from a local tarball:
 ```bash
 dsh plugin --profile <profile> add ./dsh-plugin-archived-sessions-0.2.0.tgz
 ```
+
+Installing by the bare npm name (`dsh plugin --profile <profile> add
+dsh-plugin-archived-sessions`) starts working once the package is published to
+the registry; it is not published yet.
 
 After installation, open Settings → **归档会话**.
 

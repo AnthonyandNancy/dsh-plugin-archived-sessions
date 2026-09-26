@@ -3,11 +3,33 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "description": "Workspace root bundle shim: a git install spec resolves to this package, whose patch layer loads packages/dsh-plugin-archived-sessions.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "cordis.patch.yml",
+    "packages/dsh-plugin-archived-sessions/LICENSE",
+    "packages/dsh-plugin-archived-sessions/README.md",
+    "packages/dsh-plugin-archived-sessions/cordis.patch.yml",
+    "packages/dsh-plugin-archived-sessions/package.json",
+    "packages/dsh-plugin-archived-sessions/lib/index.js",
+    "packages/dsh-plugin-archived-sessions/lib/client.js",
+    "packages/dsh-plugin-archived-sessions/lib/typert.host.js",
+    "packages/dsh-plugin-archived-sessions/lib/typert.host.d.ts",
+    "packages/dsh-plugin-archived-sessions/lib/typert.remote-client.js",
+    "packages/dsh-plugin-archived-sessions/lib/typert.remote-client.d.ts",
+    "packages/dsh-plugin-archived-sessions/lib/types/**/*.js",
+    "packages/dsh-plugin-archived-sessions/lib/types/**/*.d.ts"
+  ],
   "scripts": {
     "build": "npm run build:host && npm run build:client",
     "build:host": "tsc -b tsconfig.host.json && tsdown --env.DSH_BUILD_FACE host",
     "build:client": "tsc -b tsconfig.client.json && tsdown --env.DSH_BUILD_FACE client",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "prepack": "cd packages/dsh-plugin-archived-sessions && npm run prepack"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-typert-generator": "0.1.7-rc.1",

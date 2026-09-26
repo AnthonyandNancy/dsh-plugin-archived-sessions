@@ -50,7 +50,10 @@ importers:
         version: link:../../vendor/cordis
 
   packages/dsh-plugin-archived-sessions:
-    dependencies:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
       '@deepseek-ai/dsh-agent':
         specifier: ^0.1.7-rc.1
         version: 0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f)
@@ -59,7 +62,7 @@ importers:
         version: 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-client-connection@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))
       '@deepseek-ai/dsh-api-session-controller':
         specifier: ^0.1.7-rc.1
-        version: 0.1.7-rc.1(f2cbdc621a8f9133f80aea4a98eb37fa)
+        version: 0.1.7-rc.1(2a7f7585df29403b916d739da9e58ee6)
       '@deepseek-ai/dsh-api-workspace-controller':
         specifier: ^0.1.7-rc.1
         version: 0.1.7-rc.1(2285eb9598c1049546f698d97f2f0c7e)
@@ -84,16 +87,12 @@ importers:
       '@deepseek-ai/dsh-session-persistence':
         specifier: ^0.1.7-rc.1
         version: 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/dsh-timeout@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
-      '@deepseek-ai/dsh-workspace':
-        specifier: ^0.1.7-rc.1
-        version: 0.1.7-rc.1(8bfd80ccdab353270fca6c6bd5f02ba4)
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:^
-        version: link:../../vendor/cordis
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:^
         version: link:../dsh-typert-protocol
+      '@deepseek-ai/dsh-workspace':
+        specifier: ^0.1.7-rc.1
+        version: 0.1.7-rc.1(8bfd80ccdab353270fca6c6bd5f02ba4)
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
@@ -163,15 +162,6 @@ packages:
       '@deepseek-ai/cordis': ^4.0.1
       '@deepseek-ai/cordis-plugin-loader': ^1.0.2
 
-  '@deepseek-ai/cordis-plugin-loader@1.0.2':
-    resolution: {integrity: sha512-RIW9hoVyhYDWdCI9BsvtZccPde1ECLC4OAxupwowGTak78vwVTVdb3HezTSOK1Y1/Ax3Ru0LA1pYOB04CnTxIQ==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ^4.0.1
-      node-addon-require-builtin: ^0.1.4
-    peerDependenciesMeta:
-      node-addon-require-builtin:
-        optional: true
-
   '@deepseek-ai/cordis-plugin-loader@1.0.5':
     resolution: {integrity: sha512-200huL2ttWcjyeYllvPYn+qMR7I89qy8MhZasbHltPzB/KMrSfsyoCYKdCGc5KqPGj5iJugcmibQzjINMO9I+Q==}
     peerDependencies:
@@ -192,9 +182,6 @@ packages:
         optional: true
       '@deepseek-ai/cordis-plugin-loader':
         optional: true
-
-  '@deepseek-ai/cosmokit@1.8.2':
-    resolution: {integrity: sha512-muBOKtSrUKU5m/xpq8ZXWL6hQ/jgd4PhU2PqH97bcxIiLEJfNwZOGQEx4t/aS/GgxRAR+ra9pMHPMtTHU4sqqA==}
 
   '@deepseek-ai/cosmokit@1.8.5':
     resolution: {integrity: sha512-LXsrlem9z8dq4sLflj2yuCuYX7KqhdzF5hZly3eZyuTo8d6oDSOXuEgC5DbQWKW+lksm6zmOutQLsP/ma6wR6A==}
@@ -1310,32 +1297,25 @@ packages:
 
 snapshots:
 
-  '@deepseek-ai/cordis-plugin-group@1.0.4(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)':
+  '@deepseek-ai/cordis-plugin-group@1.0.4(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
+      '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
 
-  '@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)':
+  '@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
-      '@deepseek-ai/cosmokit': 1.8.2
+      '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
+      '@deepseek-ai/cosmokit': 1.8.5
       js-yaml: 4.3.1
 
   '@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5)(@deepseek-ai/cordis@4.0.1)':
     dependencies:
       '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.5)
       '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@4.0.1)(node-addon-require-builtin@0.1.6)
-      '@deepseek-ai/cosmokit': 1.8.2
+      '@deepseek-ai/cosmokit': 1.8.5
       js-yaml: 4.3.1
     optional: true
-
-  '@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)':
-    dependencies:
-      '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cosmokit': 1.8.2
-    optionalDependencies:
-      node-addon-require-builtin: 0.1.6
 
   '@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@4.0.1)(node-addon-require-builtin@0.1.6)':
     dependencies:
@@ -1356,21 +1336,19 @@ snapshots:
 
   '@deepseek-ai/cordis@4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.5)':
     dependencies:
-      '@deepseek-ai/cosmokit': 1.8.2
+      '@deepseek-ai/cosmokit': 1.8.5
       '@standard-schema/spec': 1.1.0
     optionalDependencies:
       '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5)(@deepseek-ai/cordis@4.0.1)
       '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@4.0.1)(node-addon-require-builtin@0.1.6)
 
-  '@deepseek-ai/cosmokit@1.8.2': {}
-
   '@deepseek-ai/cosmokit@1.8.5': {}
 
-  '@deepseek-ai/dsh-agent-default-model@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-agent@0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f))(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))':
+  '@deepseek-ai/dsh-agent-default-model@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-agent@0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f))(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-agent': 0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f)
-      '@deepseek-ai/dsh-config-editor': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))
+      '@deepseek-ai/dsh-config-editor': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))
       '@deepseek-ai/dsh-llm': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/schemastery': 3.18.4
     transitivePeerDependencies:
@@ -1379,18 +1357,18 @@ snapshots:
       - '@deepseek-ai/dsh-app-boot'
       - '@deepseek-ai/dsh-hmr'
 
-  '@deepseek-ai/dsh-agent-preset-registry@0.1.7-rc.1(714f75a5eb74de03c43ad0562ec52673)':
+  '@deepseek-ai/dsh-agent-preset-registry@0.1.7-rc.1(879a005fe1c844c4becf803e975dd578)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
+      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
+      '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
       '@deepseek-ai/dsh-agent': 0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f)
-      '@deepseek-ai/dsh-app-boot': 0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258)
+      '@deepseek-ai/dsh-app-boot': 0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31)
       '@deepseek-ai/dsh-invariants': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/dsh-scope': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
       '@deepseek-ai/dsh-session': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)))
       '@deepseek-ai/dsh-session-projection': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))
-      '@deepseek-ai/dsh-settings': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/schemastery@3.18.4)(node-addon-require-builtin@0.1.6)
+      '@deepseek-ai/dsh-settings': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/schemastery@3.18.4)(node-addon-require-builtin@0.1.6)
       '@deepseek-ai/dsh-system-prompt': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)))
       '@deepseek-ai/dsh-tools': 0.1.7-rc.1(872c7a7821bd0d03812fab0c8ce89566)
       '@deepseek-ai/dsh-typert-protocol': link:packages/dsh-typert-protocol
@@ -1429,12 +1407,12 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@deepseek-ai/dsh-api-session-controller@0.1.7-rc.1(f2cbdc621a8f9133f80aea4a98eb37fa)':
+  '@deepseek-ai/dsh-api-session-controller@0.1.7-rc.1(2a7f7585df29403b916d739da9e58ee6)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-agent': 0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f)
-      '@deepseek-ai/dsh-agent-default-model': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-agent@0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f))(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
-      '@deepseek-ai/dsh-agent-preset-registry': 0.1.7-rc.1(714f75a5eb74de03c43ad0562ec52673)
+      '@deepseek-ai/dsh-agent-default-model': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-agent@0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f))(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
+      '@deepseek-ai/dsh-agent-preset-registry': 0.1.7-rc.1(879a005fe1c844c4becf803e975dd578)
       '@deepseek-ai/dsh-api-gateway': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-client-connection@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))
       '@deepseek-ai/dsh-attachment': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
       '@deepseek-ai/dsh-brand': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
@@ -1452,7 +1430,7 @@ snapshots:
       '@deepseek-ai/dsh-session-query': 0.1.7-rc.1(1270e02a2d6f9ecaacf05239af8a62a9)
       '@deepseek-ai/dsh-session-title': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-agent@0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session-projection@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)))))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))
       '@deepseek-ai/dsh-skill': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)))
-      '@deepseek-ai/dsh-subagent': 0.1.7-rc.1(43ebdeed41a9c7336fb9e4bc2e9ce0fc)
+      '@deepseek-ai/dsh-subagent': 0.1.7-rc.1(f742726255e8fd6d44bead37378da0e3)
       '@deepseek-ai/dsh-typert-protocol': link:packages/dsh-typert-protocol
       '@deepseek-ai/dsh-typert-registry': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/dsh-util-time': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
@@ -1480,12 +1458,12 @@ snapshots:
       '@deepseek-ai/schemastery': 3.18.4
       zod: 4.4.3
 
-  '@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258)':
+  '@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cordis-plugin-group': 1.0.4(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
-      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
+      '@deepseek-ai/cordis-plugin-group': 1.0.4(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
+      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
+      '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
       '@deepseek-ai/dsh-atomic-write': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/dsh-home-paths': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/dsh-launch-environment': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
@@ -1588,22 +1566,12 @@ snapshots:
       '@deepseek-ai/dsh-llm': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/dsh-session': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)))
 
-  '@deepseek-ai/dsh-config-editor@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))':
+  '@deepseek-ai/dsh-config-editor@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
-      '@deepseek-ai/dsh-app-boot': 0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258)
-      '@deepseek-ai/dsh-atomic-write': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
-      js-yaml: 4.3.1
-      yaml: 2.9.1
-
-  '@deepseek-ai/dsh-config-editor@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))':
-    dependencies:
-      '@deepseek-ai/cordis': link:vendor/cordis
-      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
+      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
-      '@deepseek-ai/dsh-app-boot': 0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258)
+      '@deepseek-ai/dsh-app-boot': 0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31)
       '@deepseek-ai/dsh-atomic-write': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       js-yaml: 4.3.1
       yaml: 2.9.1
@@ -1794,13 +1762,13 @@ snapshots:
       '@deepseek-ai/dsh-scope': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
       '@deepseek-ai/dsh-util-values': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
 
-  '@deepseek-ai/dsh-settings@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/schemastery@3.18.4)(node-addon-require-builtin@0.1.6)':
+  '@deepseek-ai/dsh-settings@0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/schemastery@3.18.4)(node-addon-require-builtin@0.1.6)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/cordis-plugin-loader': 1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6)
       '@deepseek-ai/cosmokit': 1.8.5
       '@deepseek-ai/dsh-brand': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
-      '@deepseek-ai/dsh-config-editor': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))
+      '@deepseek-ai/dsh-config-editor': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))
       '@deepseek-ai/dsh-invariants': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
       '@deepseek-ai/dsh-session': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)))
       '@deepseek-ai/dsh-util-values': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)
@@ -1832,7 +1800,7 @@ snapshots:
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
 
-  '@deepseek-ai/dsh-subagent@0.1.7-rc.1(43ebdeed41a9c7336fb9e4bc2e9ce0fc)':
+  '@deepseek-ai/dsh-subagent@0.1.7-rc.1(f742726255e8fd6d44bead37378da0e3)':
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-agent': 0.1.7-rc.1(a5a91f016a643f85224b6f1c1840747f)
@@ -1851,13 +1819,13 @@ snapshots:
       '@deepseek-ai/schemastery': 3.18.4
       zod: 4.4.3
     optionalDependencies:
-      '@deepseek-ai/dsh-agent-preset-registry': 0.1.7-rc.1(714f75a5eb74de03c43ad0562ec52673)
+      '@deepseek-ai/dsh-agent-preset-registry': 0.1.7-rc.1(879a005fe1c844c4becf803e975dd578)
       '@deepseek-ai/dsh-sandbox': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-llm@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))
       '@deepseek-ai/dsh-sandbox-policy': 0.1.7-rc.1(4b9114086ae179deae5d729b19474ebe)
       '@deepseek-ai/dsh-session-persistence': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/dsh-timeout@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))
       '@deepseek-ai/dsh-session-projection': 0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))
       '@deepseek-ai/dsh-session-query': 0.1.7-rc.1(1270e02a2d6f9ecaacf05239af8a62a9)
-      '@deepseek-ai/dsh-settings': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(3d087e09bcd5ff1013e3c6ee0be0f258))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/schemastery@3.18.4)(node-addon-require-builtin@0.1.6)
+      '@deepseek-ai/dsh-settings': 0.1.7-rc.1(@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.5(@deepseek-ai/cordis@vendor+cordis)(node-addon-require-builtin@0.1.6))(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-app-boot@0.1.7-rc.1(c57b32671e6967970d0a07e9551ede31))(@deepseek-ai/dsh-brand@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-session@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-scope@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.1.7-rc.1(@deepseek-ai/cordis@vendor+cordis))))(@deepseek-ai/schemastery@3.18.4)(node-addon-require-builtin@0.1.6)
       '@deepseek-ai/dsh-user-approval': 0.1.7-rc.1(5c394dff171dd4f411735900e2c71b69)
       '@deepseek-ai/dsh-workspace': 0.1.7-rc.1(8bfd80ccdab353270fca6c6bd5f02ba4)
 
