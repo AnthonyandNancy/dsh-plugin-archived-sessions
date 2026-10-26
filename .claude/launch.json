@@ -1,0 +1,9 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dsh-web-probe",
+      "url": "http://127.0.0.1:51234"
+    }
+  ]
+}
