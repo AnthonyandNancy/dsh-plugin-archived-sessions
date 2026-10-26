@@ -46,7 +46,11 @@ function verifyArtifact(relativePath) {
     if (!descriptor.includes('create:')) {
       throw new Error(`${relativePath} has no create() codec factory for ${endpoint} (0.1.7 requires create:, not schema:)`)
     }
-    if (/(^|[\s{,])schema:\s/.test(descriptor)) {
+    // Match a real top-level codec key (`schema:`), not the legitimate
+    // `jsonSchema:` / `jsonSchemaError:` projection fields emitted by 0.2.1.
+    // Quoted lines are description/message text and cannot carry a codec key.
+    const code = descriptor.split('\n').filter(line => !line.includes("'")).join('\n')
+    if (/(^|[\s{,])schema:\s/m.test(code)) {
       throw new Error(`${relativePath} still uses the removed schema: codec contribution for ${endpoint}`)
     }
   }

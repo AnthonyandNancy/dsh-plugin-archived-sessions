@@ -49,6 +49,13 @@ const SHIMS = [
     title: '`./types` subpath',
     counterpart: '`lib/types/types.js` and `lib/types/types.d.ts`',
   },
+  {
+    declaration: 'lib/types/remote-info.d.ts',
+    shim: 'src/remote-info.ts',
+    specifier: '../lib/types/remote-info.js',
+    title: '`./remote-info` subpath',
+    counterpart: '`lib/types/remote-info.js` and `lib/types/remote-info.d.ts`',
+  },
 ]
 
 /** Statements this script understands. Anything else is a hard error. */

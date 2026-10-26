@@ -16,9 +16,14 @@ independent **归档会话** page under Settings.
 
 ## Requirements
 
-- DeepSeek Harness **>= 0.1.0-rc.6** (DSH Desktop 0.1.0-rc.6 and later). The
-  plugin never hard-requires a specific runtime capability: the Host
-  capability-detects every destructive path at startup and degrades gracefully.
+- DeepSeek Harness **>= 0.1.0-rc.6** for the existing capability-probing paths;
+  the current release is explicitly verified against DSH **0.2.1-rc.1 and later
+  0.2.1 prereleases** (including `0.2.1-rc.2`). The exact accepted versions are
+  declared by `peerDependencies`; DSH 0.2.1 prereleases satisfy the existing
+  `^0.1.7-rc.1 || ^0.2.0-rc.1` range when the runtime evaluates prereleases.
+  The plugin never hard-requires a specific runtime capability:
+  the Host capability-detects every destructive path at startup and degrades
+  gracefully.
 - The host must provide the official Typert Remote runtime and the shared web
   client modules listed in `peerDependencies`.
 

@@ -1,7 +1,7 @@
 # Vendored `@deepseek-ai/dsh-typert-protocol`
 
 This directory is a **workspace package whose runtime and declarations are a verbatim
-copy of the published `@deepseek-ai/dsh-typert-protocol@0.1.7-rc.1` build**, not source
+copy of the published `@deepseek-ai/dsh-typert-protocol@0.2.1-rc.1` build**, not source
 that this repository compiles. `lib/` is checked in (an exception in `.gitignore`).
 
 ## Why it lives here at all
@@ -16,13 +16,17 @@ method invisible (`publishes Remote artifacts but has no Remote methods`).
 
 It also has to be a *source* package for the analyzer, which maps each published export
 target back to source (`lib/types/<name>.d.ts` → `src/<name>.ts`) and looks that file up
-in its TypeScript program. That is what `src/index.ts` and `src/types.ts` are: one-line
+in its TypeScript program. That is what `src/index.ts`, `src/types.ts` and `src/remote-info.ts` are: one-line
 re-exports that put the protocol's declarations in the source plane without duplicating
 them.
 
 The 0.1.7 program only *selects* packages that show a surface marker
 (`sourceFileHasSurface`), and the marker that makes the protocol a contributor is the
 `declare module '@deepseek-ai/cordis'` augmentation inside `lib/types/types.d.ts`.
+
+0.2.1 adds the `./remote-info` public subpath; `sync-shims.mjs` therefore also
+generates `src/remote-info.ts` so the Typert generator can resolve the new
+generated-artifact import in both the manifest and source planes.
 
 ## Updating it
 

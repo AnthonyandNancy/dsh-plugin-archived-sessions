@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-typert-protocol",
-  "description": "Compiler-independent Remote metadata and Typert provider protocols (vendored build of the published 0.1.7-rc.1 package, see VENDOR.md)",
-  "version": "0.1.7-rc.1",
+  "description": "Compiler-independent Remote metadata and Typert provider protocols (vendored build of the published 0.2.1-rc.1 package, see VENDOR.md)",
+  "version": "0.2.1-rc.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -15,6 +15,10 @@
       "types": "./lib/types/types.d.ts",
       "default": "./lib/types/types.js"
     },
+    "./remote-info": {
+      "types": "./lib/types/remote-info.d.ts",
+      "default": "./lib/types/remote-info.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -24,7 +28,7 @@
     "check-shims": "node scripts/sync-shims.mjs --check"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-brand": "0.1.7-rc.1"
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"

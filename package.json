@@ -32,8 +32,8 @@
     "prepack": "cd packages/dsh-plugin-archived-sessions && npm run prepack"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-typert-generator": "0.1.7-rc.1",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-typert-generator": "0.2.1-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.1",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",

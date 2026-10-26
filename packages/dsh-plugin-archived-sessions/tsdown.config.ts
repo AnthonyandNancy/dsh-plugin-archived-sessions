@@ -24,6 +24,7 @@ const PLATFORM_MODULES = [
   '@deepseek-ai/dsh-client-ui-dockkit',
   '@deepseek-ai/dsh-client-ui-primitives',
   '@deepseek-ai/dsh-client-ui-slots',
+  'zod',
 ]
 
 const CLIENT_EXTERNALS = [...PLATFORM_MODULES]
@@ -47,7 +48,10 @@ export default defineConfig(({ env }) => {
         'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
         'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
       },
-      noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) || id.startsWith('@deepseek-ai/') ? undefined : true),
+      // Bundle non-platform code, including the workspace protocol package.
+      // The web shell only seeds the modules named in CLIENT_EXTERNALS; a
+      // generated remote-info import must therefore travel inside this bundle.
+      noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
       outputOptions: {
         entryFileNames: 'client.js',
         banner: `window.__ModuleLoader__.load({ id: "dsh-plugin-archived-sessions", factory: (require) => {`,
